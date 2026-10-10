@@ -277,11 +277,13 @@ const IDLE_ARM = 0.95;             // 站立时手臂角度(朝下，贴着球)
 const canvas = document.getElementById('cv');
 const ctx = canvas.getContext('2d');
 let dpr = 1;
+let ballTex = null, ballTexR = 0;      // 球体贴图（resize 时构建，必须先于 resize 声明）
 function resize(){
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = W * dpr; canvas.height = H * dpr;
   canvas.style.aspectRatio = W + '/' + H;
   ctx.setTransform(dpr,0,0,dpr,0,0);
+  if(typeof buildBallTexture === 'function' && dpr) buildBallTexture();   // 高分屏下重建更清晰的球纹
 }
 resize();
 window.addEventListener('resize', resize);
@@ -404,11 +406,21 @@ function advanceLevel(cleared){
     showEnd(g.cleared >= LEVELS.length);
   }
 }
+function updateTrail(dt){
+  if(g.phase === 'fly') return;          // 飞行中由 updateFly 维护
+  // 球不在飞的时候让拖影淡出，避免落地处留下圆形残影
+  for(let i = g.trail.length - 1; i >= 0; i--){
+    const p = g.trail[i];
+    p.a -= dt * 3.2;
+    if(p.a <= 0) g.trail.splice(i, 1);
+  }
+}
 function resetBall(){
   const b = g.ball;
   b.x = LAUNCH_X; b.y = LAUNCH_Y; b.vx = 0; b.vy = 0;
   b.rot = 0; b.spin = 0; b.live = true;
   g.aim.active = false; g.aim.power = 0;
+  g.trail.length = 0;
   g.scored = false;
   g.lv.touchedRim = false;      // 新的一球重新判定空心球
   const s = g.shot;              // 投篮人复位
@@ -714,7 +726,7 @@ function updateFly(dt){
   checkScore(prevY, prevX);
   collide();
 
-  g.trail.push({x:b.x, y:b.y});
+  g.trail.push({x:b.x, y:b.y, a:1});
   if(g.trail.length > 26) g.trail.shift();
 
   const speed = Math.hypot(b.vx, b.vy);
@@ -852,6 +864,7 @@ function loop(now){
   updateLevelMotion(now/1000, sdt);
   if(!paused){ updateAim(); updateShoot(dt); }
   updateParts(sdt);
+  updateTrail(sdt);
 
   if(!paused){
     if(g.phase === 'fly') updateFly(dt);
@@ -899,7 +912,7 @@ function render(){
   if(sh > .3) ctx.translate((Math.random()-.5)*sh, (Math.random()-.5)*sh);
 
   drawSky();
-  drawCrowd();
+  drawFence();
   drawGround();
 
   const {cx, cy} = rimCenters();
@@ -964,19 +977,21 @@ function drawSky(){
   for(let x=0;x<=W;x+=40) ctx.lineTo(x, H*.62 - Math.sin(x*.006)*38 - Math.cos(x*.013)*22);
   ctx.lineTo(W, H); ctx.lineTo(0,H); ctx.fill();
 }
-function drawCrowd(){
-  // 看台剪影
-  ctx.fillStyle = 'rgba(15,23,42,.5)';
-  ctx.fillRect(0, GROUND_Y-58, W, 58);
-  ctx.fillStyle = 'rgba(8,15,30,.55)';
-  for(let row=0; row<2; row++){
-    const baseY = GROUND_Y - 54 + row*22;
-    for(let x = 8 + (row%2)*13; x < W; x += 27){
-      const h = 15 + ((x*7919)%11);
-      ctx.beginPath(); ctx.arc(x, baseY - 6, 6.2, Math.PI, 0); ctx.fill();
-      ctx.fillRect(x-6, baseY-6, 12, 16);
-    }
-  }
+function drawFence(){
+  // 场边围栏（简约：立柱 + 两道横杆 + 顶帽）
+  const top = GROUND_Y - 54, GAP = 62, POST = 5;
+  ctx.save();
+  ctx.fillStyle = 'rgba(15,23,42,.34)';
+  for(let x = 14; x < W + GAP; x += GAP) ctx.fillRect(x, top, POST, GROUND_Y - top);
+  ctx.strokeStyle = 'rgba(15,23,42,.30)';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(0, top + 16); ctx.lineTo(W, top + 16);
+  ctx.moveTo(0, top + 36); ctx.lineTo(W, top + 36);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(15,23,42,.42)';
+  ctx.fillRect(0, top, W, 4);
+  ctx.restore();
 }
 function drawGround(){
   const gg = ctx.createLinearGradient(0, GROUND_Y, 0, H);
@@ -1195,36 +1210,122 @@ function drawAim(){
 }
 function drawTrail(){
   for(let i=0;i<g.trail.length;i++){
-    const p = g.trail[i], k = i/g.trail.length;
-    ctx.fillStyle = `rgba(249,115,22,${(k*.32).toFixed(3)})`;
+    const p = g.trail[i], k = (i+1)/g.trail.length;
+    const life = (p.a === undefined) ? 1 : p.a;
+    const a = k * life * .32;
+    if(a <= .004) continue;
+    ctx.fillStyle = `rgba(249,115,22,${a.toFixed(3)})`;
     ctx.beginPath(); ctx.arc(p.x, p.y, BALL_R*(.25+k*.6), 0, 7); ctx.fill();
   }
 }
+/* ───────────────── 篮球纹理（离屏预渲染一次） ─────────────────
+   真实篮球 = 橙色皮革底 + 细密颗粒纹 + 8 片拼缝结构
+   （中缝 1 条 + 两侧极帽弧线 2 条），光照在绘制时另外叠加，
+   这样球旋转时拼缝跟着转、高光始终来自左上角。            */
+function buildBallTexture(){
+  const SS = 4;                              // 超采样，保证小尺寸下颗粒依然细腻
+  const size = Math.ceil(BALL_R * 2 * SS * Math.min(dpr, 2));
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const c = cv.getContext('2d');
+  const R = size / 2;
+  c.translate(R, R);
+  c.save();
+  c.beginPath(); c.arc(0, 0, R, 0, 7); c.clip();
+
+  // 皮革底色（略带不均，避免死板）
+  const g = c.createRadialGradient(-R * .3, -R * .35, R * .04, 0, 0, R);
+  g.addColorStop(0,   '#ffb267');
+  g.addColorStop(.35, '#f7902f');
+  g.addColorStop(.72, '#dd6f14');
+  g.addColorStop(1,   '#a9470a');
+  c.fillStyle = g;
+  c.beginPath(); c.arc(0, 0, R, 0, 7); c.fill();
+
+  // 大块色斑，让皮革有深浅变化
+  for (let i = 0; i < 26; i++){
+    const a = Math.random() * 7, rr = Math.sqrt(Math.random()) * R * .95;
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    const rad = R * (.16 + Math.random() * .3);
+    const bg = c.createRadialGradient(x, y, 0, x, y, rad);
+    const dark = Math.random() < .5;
+    bg.addColorStop(0, dark ? 'rgba(150,70,15,.16)' : 'rgba(255,205,140,.14)');
+    bg.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = bg;
+    c.beginPath(); c.arc(x, y, rad, 0, 7); c.fill();
+  }
+
+  // 皮革颗粒（凸起小点：先暗后亮，做出凹凸感）
+  const N = Math.round(size * size / 60);
+  for (let i = 0; i < N; i++){
+    const a = Math.random() * 7, rr = Math.sqrt(Math.random()) * R * .995;
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    const rad = size / 108 * (.75 + Math.random() * .75);
+    c.fillStyle = 'rgba(108,46,6,.42)';
+    c.beginPath(); c.arc(x, y + rad * .35, rad, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,228,180,.30)';
+    c.beginPath(); c.arc(x, y - rad * .3, rad * .92, 0, 7); c.fill();
+  }
+
+  // ── 拼缝：中间直线 + 左右两条极帽弧线 ──
+  const K = 0.827;                            // 贝塞尔控制点系数
+  const seams = [
+    p => { p.moveTo(0, -R); p.lineTo(0, R); },
+    p => { p.moveTo(0, -R); p.bezierCurveTo(-K*R, -R/3, -K*R, R/3, 0, R); },
+    p => { p.moveTo(0, -R); p.bezierCurveTo( K*R, -R/3,  K*R, R/3, 0, R); }
+  ];
+  const lw = Math.max(1.6, R * .105);
+  // 缝的亮边（凹陷感）
+  c.save(); c.translate(lw * .5, lw * .5);
+  c.strokeStyle = 'rgba(255,226,180,.30)'; c.lineWidth = lw * 1.15; c.lineCap = 'round';
+  seams.forEach(f => { c.beginPath(); f(c); c.stroke(); });
+  c.restore();
+  // 缝本体
+  c.strokeStyle = '#3d1603'; c.lineWidth = lw; c.lineCap = 'round';
+  seams.forEach(f => { c.beginPath(); f(c); c.stroke(); });
+  c.restore();
+
+  ballTex = cv;
+  ballTexR = R;
+}
 function drawBall(){
   const b = g.ball;
-  if(!b.live) return;
+  if(!b.live || !ballTex) return;
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  // 地面投影
   const shY = GROUND_Y + 2;
   const h = Math.max(0, shY - b.y);
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
   ctx.beginPath();
   ctx.ellipse(b.x, shY, 20 - Math.min(16, h*.03), 5.5, 0, 0, 7);
   ctx.globalAlpha = Math.max(.12, .35 - h*.0012);
   ctx.fill();
   ctx.globalAlpha = 1;
 
+  // 球体（跟着旋转）
   ctx.translate(b.x, b.y); ctx.rotate(b.rot);
-  const gr = ctx.createRadialGradient(-7,-8,3, 0,0,BALL_R);
-  gr.addColorStop(0,'#ffcf8a'); gr.addColorStop(.45,'#f2801d'); gr.addColorStop(1,'#b45309');
-  ctx.fillStyle = gr;
-  ctx.beginPath(); ctx.arc(0,0,BALL_R,0,7); ctx.fill();
-  ctx.strokeStyle = '#4a1d05'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(0,0,BALL_R,0,7); ctx.stroke();
-  ctx.lineWidth = 1.6;
-  ctx.beginPath(); ctx.moveTo(-BALL_R,0); ctx.lineTo(BALL_R,0); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0,-BALL_R); ctx.lineTo(0,BALL_R); ctx.stroke();
-  ctx.beginPath(); ctx.ellipse(0,0,BALL_R*.55,BALL_R,0,0,7); ctx.stroke();
-  ctx.beginPath(); ctx.ellipse(0,0,BALL_R,BALL_R*.55,0,0,7); ctx.stroke();
+  ctx.drawImage(ballTex, -BALL_R, -BALL_R, BALL_R*2, BALL_R*2);
+  ctx.restore();
+
+  // 光照层：不随球旋转，高光恒定来自左上方
+  ctx.save();
+  const hl = ctx.createRadialGradient(b.x - BALL_R*.36, b.y - BALL_R*.42, BALL_R*.04,
+                                      b.x, b.y, BALL_R*1.15);
+  hl.addColorStop(0,  'rgba(255,244,214,.50)');
+  hl.addColorStop(.3, 'rgba(255,226,170,.16)');
+  hl.addColorStop(1,  'rgba(255,200,120,0)');
+  ctx.fillStyle = hl;
+  ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R*1.15, 0, 7); ctx.fill();
+
+  const rim = ctx.createRadialGradient(b.x, b.y, BALL_R*.5, b.x, b.y, BALL_R);
+  rim.addColorStop(0,   'rgba(70,24,0,0)');
+  rim.addColorStop(.72, 'rgba(70,24,0,.10)');
+  rim.addColorStop(1,   'rgba(38,10,0,.46)');
+  ctx.fillStyle = rim;
+  ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R, 0, 7); ctx.fill();
+
+  ctx.strokeStyle = 'rgba(60,24,4,.75)'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R - .7, 0, 7); ctx.stroke();
   ctx.restore();
 }
 function drawParts(){
@@ -1267,6 +1368,7 @@ $('btnSound').addEventListener('click', e => {
 });
 document.addEventListener('visibilitychange', () => { last = performance.now(); });
 
+// 球纹已在 resize() 里按 dpr 构建
 loadLevel(0);
 g.phase = 'menu';
 requestAnimationFrame(loop);
