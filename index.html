@@ -94,6 +94,27 @@
   }
   .overlay.show{opacity:1; pointer-events:auto}
   #ovHelp{z-index:8}
+  #ovSet{z-index:8}
+  /* 设置项 */
+  .set-block{display:flex; flex-direction:column; gap:10px; text-align:left;
+    background:rgba(148,163,184,.1); border:1px solid rgba(148,163,184,.18);
+    border-radius:12px; padding:14px 16px; margin:6px 0 10px}
+  .set-txt{flex:1; display:flex; flex-direction:column; gap:6px}
+  .set-txt b{font-size:14.5px}
+  .set-txt b em{font-style:normal; font-size:10.5px; font-weight:600; letter-spacing:.5px;
+    color:#fbbf24; background:rgba(250,204,21,.14); border:1px solid rgba(250,204,21,.35);
+    padding:1px 6px; border-radius:999px; margin-left:6px; vertical-align:1px}
+  .set-txt span{font-size:12px; line-height:1.65; opacity:.6}
+  .set-txt span em{font-style:normal; opacity:1}
+  .set-hint{font-size:11.5px; line-height:1.6; opacity:.5; min-height:2.6em}
+  .set-note{font-size:11px; opacity:.42; margin-bottom:2px}
+  .seg{display:flex; gap:4px; padding:4px; background:rgba(15,23,42,.4);
+    border:1px solid rgba(148,163,184,.2); border-radius:10px}
+  .seg-btn{flex:1; font:inherit; font-size:12.5px; font-weight:600; padding:8px 4px;
+    border:none; border-radius:7px; background:transparent; color:#cbd5e1; cursor:pointer;
+    white-space:nowrap; transition:background .18s, color .18s}
+  .seg-btn:hover[aria-checked="false"]{background:rgba(148,163,184,.16)}
+  .seg-btn[aria-checked="true"]{background:#4ade80; color:#0f172a}
   .card{
     width:min(90%, 420px);
     padding:26px 24px;
@@ -171,6 +192,7 @@
     <button class="btn ghost" id="btnSound">🔊</button>
     <button class="btn ghost" id="btnRestart">重开</button>
     <button class="btn ghost round" id="btnHelp" title="玩法说明">?</button>
+    <button class="btn ghost round" id="btnSet" title="设置">⚙</button>
   </div>
 
   <div id="stage">
@@ -185,6 +207,7 @@
           <div><i>松开</i>出手投篮</div>
         </div>
         <p style="opacity:.6;font-size:12.5px">拖得越远力量越大，方向决定弧线；<br/>空心入网有额外奖励，注意风力和移动篮架。</p>
+        <p style="opacity:.55;font-size:12px"><b style="color:#fbbf24">瞄准辅助默认是「抛物线」</b>——初级提示；<br/>投不准可去 <b>⚙ 设置</b> 换成「弹道预览」或关掉辅助，选择会记住。</p>
         <div class="row">
           <button class="btn" id="btnStart">开始游戏</button>
           <button class="btn ghost" id="btnHelp2">玩法说明</button>
@@ -209,12 +232,24 @@
         <ol class="steps">
           <li><em>按住</em>篮球向后拖拽，松手投篮 —— 就像拉弹弓。</li>
           <li>拖得<em>越远</em>力量越大（绿 → 黄 → 红），拖拽方向就是球的出射方向。</li>
-          <li>拖拽时会出现<em>白色虚线</em>，那是预测的抛物线，配合它瞄准篮圈。</li>
           <li>把球送进篮筐即可得分；<em>空心入网（不碰篮圈）</em>额外 +50。</li>
           <li>连中会有<em>连击加成</em>，一球不中就归零，所以尽量别打断节奏。</li>
           <li>每关左上角进度条是<em>本关目标分</em>，达标立刻过关并结算剩余时间奖励。</li>
-          <li>时间耗尽也会进入下一关，���没达标就没有时间奖励。</li>
+          <li>时间耗尽也会进入下一关，但没达标就没有时间奖励。</li>
         </ol>
+        <div class="set-block" style="margin:4px 0 14px">
+          <div class="set-txt">
+            <b>瞄准辅助线</b>
+            <span><b>抛物线</b>：只画理想弧线，不考虑篮圈、挡板与篮架移动。<br/>
+            <b>弹道预览</b>：考虑全部碰撞，并用<em>琥珀色</em>标出会打铁、<em>绿圈</em>标出能进、<em>橙叉</em>标出失败，移动篮架还会显示到达时的<em>虚线虚影</em>。<br/>
+            <b>关闭辅助</b>：只保留拉杆与力度环，完全凭手感投球，最接近真实篮球。</span>
+          </div>
+          <div class="seg" role="radiogroup" aria-label="瞄准辅助线">
+            <button class="seg-btn" data-assist="arc"     role="radio" aria-checked="true">抛物线</button>
+            <button class="seg-btn" data-assist="preview" role="radio" aria-checked="false">弹道预览</button>
+            <button class="seg-btn" data-assist="off"     role="radio" aria-checked="false">关闭辅助</button>
+          </div>
+        </div>
         <div class="hgrid">
           <div><b>距离分</b><span>投得越远分越高</span></div>
           <div><b>时间分</b><span>剩余时间 × 4</span></div>
@@ -234,6 +269,26 @@
         </div>
         <div class="row">
           <button class="btn" id="btnHelpClose">知道了，继续投篮</button>
+          <button class="btn ghost" id="btnHelpSet">⚙ 设置</button>
+        </div>
+      </div>
+    </div>
+    <div class="overlay" id="ovSet">
+      <div class="card">
+        <h2>⚙ 设置</h2>
+        <div class="set-block">
+          <div class="set-txt"><b>瞄准辅助线 <em>默认：抛物线</em></b></div>
+          <div class="seg" role="radiogroup" aria-label="瞄准辅助线">
+            <button class="seg-btn" data-assist="arc"     role="radio" aria-checked="true">抛物线</button>
+            <button class="seg-btn" data-assist="preview" role="radio" aria-checked="false">弹道预览</button>
+            <button class="seg-btn" data-assist="off"     role="radio" aria-checked="false">关闭辅助</button>
+          </div>
+          <div class="set-hint" id="assistHint"></div>
+        </div>
+        <div class="set-note">设置会自动保存。</div>
+        <div class="row">
+          <button class="btn" id="btnSetClose">继续游戏</button>
+          <button class="btn ghost" id="btnSetHelp">玩法说明</button>
         </div>
       </div>
     </div>
@@ -244,7 +299,7 @@
     <div class="hint">空心球 SWISH +50</div>
     <div class="hint">越远分越高</div>
     <div class="hint">R 键重开</div>
-    <div class="hint">点 ? 看玩法</div>
+    <div class="hint">? 玩法 · ⚙ 辅助线设置</div>
   </div>
 </div>
 
@@ -273,6 +328,9 @@ const JUMP_H = 96;                 // 起跳高度(px)
 const JUMP_V = Math.sqrt(2 * GRAVITY * JUMP_H);
 const LAND_T = 0.30;               // 落地缓冲时长(s)
 const IDLE_ARM = 0.95;             // 站立时手臂角度(朝下，贴着球)
+// 从松手到球真正出手的耗时（下蹲 + 起跳到最高点），移动篮架的时间基准要用它
+const RISE_T = Math.ceil(JUMP_V / (GRAVITY / 60)) / 60;
+const RELEASE_DELAY = CROUCH_T + RISE_T;
 
 const canvas = document.getElementById('cv');
 const ctx = canvas.getContext('2d');
@@ -294,8 +352,51 @@ const ui = {
   par:$('par'), bar:$('bar'),
   wind:$('windPill'), toast:$('toast'), ovStart:$('ovStart'), ovEnd:$('ovEnd'),
   endTitle:$('endTitle'), endScore:$('endScore'), endStars:$('endStars'), endInfo:$('endInfo'),
-  ovHelp:$('ovHelp')
+  ovHelp:$('ovHelp'), ovSet:$('ovSet'), assistHint:$('assistHint')
 };
+
+/* ── 设置 ──
+   arc     : 抛物线（默认）—— 纯弹道，不考虑任何碰撞
+   preview : 弹道预览 —— 考虑碰撞 + 命中判定 + 移动篮架虚影
+   off     : 完全关闭 —— 只保留拉杆与力度环                    */
+const ASSIST_ARC = 'arc', ASSIST_PREVIEW = 'preview', ASSIST_OFF = 'off';
+const SETTINGS = { assist: ASSIST_ARC };
+const ASSIST_HINT = {
+  arc: '绿色理想抛物线：只算重力和风，不考虑篮圈、挡板和篮架移动。作为初始辅助最合适。',
+  preview: '琥珀色 = 会磕到篮圈或篮板；绿圈 = 能进；橙叉 = 会打铁；移动篮架关会显示球到达时的虚线虚影。',
+  off: '只显示拉杆与力度环，完全凭手感投球，最接近真实篮球。'
+};
+const SET_KEY = 'nulan.settings';
+function loadSettings(){
+  try {
+    const raw = localStorage.getItem(SET_KEY);
+    if (raw){
+      const v = JSON.parse(raw).assist;
+      if (v === ASSIST_ARC || v === ASSIST_PREVIEW || v === ASSIST_OFF) SETTINGS.assist = v;
+    }
+  } catch (e) { /* 隐私模式 / 存储不可用：保持默认值 */ }
+}
+function saveSettings(){
+  try { localStorage.setItem(SET_KEY, JSON.stringify(SETTINGS)); }
+  catch (e) { /* 忽略：设置不持久化也能玩 */ }
+}
+function segBtns(){ return document.querySelectorAll('[data-assist]'); }
+function syncAssistUI(){
+  segBtns().forEach(b => {
+    b.setAttribute('aria-checked', b.getAttribute('data-assist') === SETTINGS.assist ? 'true' : 'false');
+  });
+  const h = ui.assistHint;
+  if (h) h.textContent = ASSIST_HINT[SETTINGS.assist] || '';
+}
+function setAssist(v){
+  if (v !== ASSIST_ARC && v !== ASSIST_PREVIEW && v !== ASSIST_OFF) return;
+  SETTINGS.assist = v;
+  saveSettings();
+  syncAssistUI();
+}
+function isPaused(){
+  return ui.ovHelp.classList.contains('show') || ui.ovSet.classList.contains('show');
+}
 
 /* ─────────────────────────── 音效 ─────────────────────────── */
 let actx = null, muted = false;
@@ -440,6 +541,16 @@ function rimCenters(){
   const cy = L.hoopY + (L.mover && L.mover.axis === 'y' ? off : 0);
   return { cx, cy };
 }
+/* 任意「距今 tOff 秒」时刻篮架会在哪 —— 预览用，和 rimCenters() 同一套公式 */
+function hoopAt(tOff){
+  const L = g.lv, m = L.mover;
+  if(!m) return { cx: L.hoopX, cy: L.hoopY };
+  const off = Math.sin((L.timer + tOff) * m.speed) * m.amp;
+  return {
+    cx: L.hoopX + (m.axis === 'x' ? off : 0),
+    cy: L.hoopY + (m.axis === 'y' ? off : 0)
+  };
+}
 
 /* ─────────────────────────── 碰撞体 ─────────────────────────── */
 /* 侧视图：篮板在篮圈远端（右侧），否则球从左侧下落必被篮板挡下 */
@@ -470,7 +581,7 @@ function toWorld(ev){
 }
 canvas.addEventListener('pointerdown', e => {
   audio();
-  if(ui.ovHelp.classList.contains('show')) return;   // 看玩法时不响应拖拽
+  if(isPaused()) return;                 // 面板打开时不响应拖拽
   if(g.phase !== 'aim') return;
   const p = toWorld(e);
   const d = Math.hypot(p.x - g.ball.x, p.y - g.ball.y);
@@ -604,10 +715,10 @@ canvas.addEventListener('pointerup', endAim);
 canvas.addEventListener('pointercancel', endAim);
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 window.addEventListener('keydown', e => {
-  if(e.key === 'Escape' && ui.ovHelp.classList.contains('show')){ closeHelp(); return; }
+  if(e.key === 'Escape' && isPaused()){ closePanels(); return; }
   if(e.key === 'h' || e.key === 'H' || e.key === '?'){ toggleHelp(); return; }
   if(e.key === 'r' || e.key === 'R'){ startGame(); }
-  if(e.code === 'Space' && g.phase === 'over' && !ui.ovHelp.classList.contains('show')){ $('btnAgain').click(); }
+  if(e.code === 'Space' && g.phase === 'over' && !isPaused()){ $('btnAgain').click(); }
 });
 
 /* ─────────────────────────── 物理 ─────────────────────────── */
@@ -618,6 +729,8 @@ function updateAim(){
   g.aim.power = len;
   g.aim.ang = Math.atan2(-dy, dx);
 }
+/* ── 选项①：理想抛物线（不考虑任何碰撞） ──
+   保留最初版本的形态：只要重力和风，纯几何弹道，不判断能否进球。 */
 function predict(px, py, vx, vy){
   const pts = [];
   let x=px, y=py, a=vx, b=vy;
@@ -632,6 +745,82 @@ function predict(px, py, vx, vy){
     if(y > GROUND_Y + 4 || x < -60 || x > W+60) break;
   }
   return pts;
+}
+/* ── 预览用弹道模拟 ──
+   与 updateFly 同源：同样的步长、同样的碰撞、命中判定也在碰撞之前，
+   所以「预览所见」= 「实机所得」。移动篮架按 hoopAt(tOff) 逐帧推进，
+   因此能算出球到达时篮架究竟在哪。                              */
+function simulateShot(px, py, vx, vy){
+  const L = g.lv;
+  const dt = 1/60;
+  const pts = [];
+  let x = px, y = py, a = vx, b = vy, t = 0;
+  let scored = false, rimHit = false, boardHit = false, mark = false;
+  let firstCross = null, arrive = null;
+  for (let i = 0; i < 400; i++){
+    const hp = hoopAt(RELEASE_DELAY + t);   // 本帧开始时篮架的位置
+    const prevX = x, prevY = y;
+    a += (L.wind || 0) * dt;
+    b += GRAVITY * dt;
+    const d = 1 - DRAG * dt;
+    a *= d; b *= d;
+    x += a*dt; y += b*dt;
+    t += dt;
+
+    // 穿过篮圈平面的时刻。球若先磕了篮圈，第一次可能没进窗口、
+    // 真正得分发生在后面某次，所以「命中时刻」要以命中的那次为准。
+    if (b > 0 && prevY <= hp.cy && y >= hp.cy){
+      const k = (hp.cy - prevY) / ((y - prevY) || 1);
+      const xc = prevX + (x - prevX) * k;
+      if (!firstCross) firstCross = { cx: hp.cx, cy: hp.cy, x: xc, t: t - dt + k*dt, err: Math.abs(xc - hp.cx) };
+      if (!scored && firstCross.err <= L.rim/2 - 4){ scored = true; mark = true; arrive = firstCross; }
+    }
+    // 矩形体：篮板 / 立柱 / 关卡挡板（与 hoopRects() 同源）
+    const rects = [
+      { x: hp.cx + L.rim/2 + 3, y: hp.cy - 100, w: 18, h: 102, board: 1 },
+      { x: hp.cx + L.rim/2 + 7, y: hp.cy + 2, w: 12, h: GROUND_Y - hp.cy }
+    ].concat(L.blocks || []);
+    for (let k = 0; k < rects.length; k++){
+      const hit = circleRect(x, y, BALL_R, rects[k]);
+      if (!hit) continue;
+      x = hit.nx; y = hit.ny;
+      const vn = a*hit.dx + b*hit.dy;
+      if (vn < 0){
+        a -= 1.55*vn*hit.dx; b -= 1.55*vn*hit.dy; a *= .62; b *= .62;
+        mark = true;
+        if (rects[k].board) boardHit = true;
+      }
+    }
+    // 篮圈
+    for (const s of [-1, 1]){
+      const rx = hp.cx + s*L.rim/2, ry = hp.cy, rr = RIM_R + BALL_R;
+      const dx = x-rx, dy = y-ry, d2 = dx*dx + dy*dy;
+      if (d2 < rr*rr){
+        const dd = Math.sqrt(d2) || 1e-4, nx = dx/dd, ny = dy/dd;
+        x = rx + nx*rr; y = ry + ny*rr;
+        const vn = a*nx + b*ny;
+        if (vn < 0){
+          a -= 1.62*vn*nx; b -= 1.62*vn*ny; a *= .86; b *= .86;
+          if (!rimHit){ rimHit = true; mark = true; }
+        }
+      }
+    }
+    // 地面
+    if (y + BALL_R > GROUND_Y){
+      y = GROUND_Y - BALL_R;
+      if (b > 0){ b *= -0.52; a *= .78; }
+      else b = 0;
+    }
+    // 左右墙
+    if (x < BALL_R){ x = BALL_R; if (a < 0) a *= -0.55; }
+    if (x > W - BALL_R){ x = W - BALL_R; if (a > 0) a *= -0.55; }
+
+    if (i % 2 === 0) pts.push({ x, y, m: mark });
+    if (y > H + 40 || x < -80 || x > W + 80) break;
+    if (b > 0 && y >= GROUND_Y - BALL_R - 1 && Math.hypot(a,b) < 62) break;
+  }
+  // 命中则显示命中时刻的篮架位置；没命中则退回第一次穿过平面的落点提示
+  return { pts, scored, rimHit, boardHit, arrive: arrive || firstCross };
 }
 function circleRect(cx, cy, r, rc){
   const nx = Math.max(rc.x, Math.min(cx, rc.x + rc.w));
@@ -820,6 +1009,7 @@ function showToast2(text, color){
 /* ── 玩法说明 ── */
 function helpOpen(){
   g.aim.active = false;          // 防止打开时手里还拉着球
+  ui.ovSet.classList.remove('show');
   ui.ovHelp.classList.add('show');
   ui.toast.classList.remove('show'); toastHideT = 0; toast2 = null;
 }
@@ -828,6 +1018,21 @@ function closeHelp(){
 }
 function toggleHelp(){
   ui.ovHelp.classList.contains('show') ? closeHelp() : helpOpen();
+}
+/* ── 设置面板 ── */
+function setOpen(){
+  g.aim.active = false;
+  ui.ovHelp.classList.remove('show');
+  ui.ovSet.classList.add('show');
+  ui.toast.classList.remove('show'); toastHideT = 0; toast2 = null;
+  syncAssistUI();
+}
+function closeSet(){
+  ui.ovSet.classList.remove('show');
+}
+function closePanels(){
+  ui.ovHelp.classList.remove('show');
+  ui.ovSet.classList.remove('show');
 }
 function updateHUD(){
   ui.score.textContent = g.score;
@@ -858,7 +1063,7 @@ let last = performance.now();
 function loop(now){
   const dt = Math.min((now - last)/1000, 1/30);
   last = now;
-  const paused = ui.ovHelp.classList.contains('show');   // 查看玩法时暂停整个游戏
+  const paused = isPaused();   // 打开玩法/设置面板时暂停整个游戏
   const sdt = paused ? 0 : dt;
 
   updateLevelMotion(now/1000, sdt);
@@ -1166,6 +1371,7 @@ function drawPlayer(){
   }
 }
 function drawAim(){
+  const L = g.lv;
   const dx = g.aim.sx - g.aim.px, dy = g.aim.sy - g.aim.py;
   let len = Math.hypot(dx, dy);
   if(len < 1){ len = 1; }
@@ -1195,18 +1401,86 @@ function drawAim(){
   ctx.beginPath(); ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, -Math.PI/2 + Math.PI*2*(pw/MAX_DRAG)); ctx.stroke();
   ctx.restore();
 
-  // 抛物线预览（从起跳最高点的实际出手位置开始算）
+  // ── 瞄准辅助 ──────────────────────────────
+  if (SETTINGS.assist === ASSIST_OFF) return;    // ③ 完全关闭：只保留上面的拉杆与力度环
+
+  // 出手点（三种非关闭模式共有的标记）
   const o = releaseOrigin(g.aim.ang);
-  const pts = predict(o.x, o.y, vx, vy);
-  // 出手点标记
   ctx.fillStyle = 'rgba(253,224,71,.9)';
   ctx.beginPath(); ctx.arc(o.x, o.y, 3.5, 0, 7); ctx.fill();
-  for(let i=0;i<pts.length;i++){
-    const p = pts[i];
-    const k = 1 - i/pts.length;
-    ctx.fillStyle = `rgba(255,255,255,${(.85*k).toFixed(3)})`;
+
+  // ① 抛物线：理想弧线，不判断能否进球
+  if (SETTINGS.assist === ASSIST_ARC){
+    const pts = predict(o.x, o.y, vx, vy);
+    for (let i = 0; i < pts.length; i++){
+      const p = pts[i];
+      const k = 1 - i/pts.length;
+      const a = .85 * k;
+      if (a <= .02) continue;
+      ctx.fillStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 2 + 3.2*k, 0, 7); ctx.fill();
+    }
+    return;
+  }
+
+  // ② 弹道预览：含碰撞、命中判定与移动篮架虚影
+  const sim = simulateShot(o.x, o.y, vx, vy);
+
+  // 移动篮架：画出球到达那一刻它会在哪。
+// 只在弹道"可预测"时给虚影 —— 一旦多次弹跳，浮点微小差异会被放大，
+// 预测到的时刻不可靠，此时路径点本身已经用琥珀色说明了会打铁。
+if (L.mover && sim.arrive && sim.arrive.t < 1.6) drawHoopGhost(sim.arrive.cx, sim.arrive.cy, sim.arrive.err);
+
+  // 出手点
+  ctx.fillStyle = 'rgba(253,224,71,.9)';
+  ctx.beginPath(); ctx.arc(o.x, o.y, 3.5, 0, 7); ctx.fill();
+
+  // 路径点：碰到篮圈/篮板之后转琥珀色，提示这一球会打铁
+  for (let i = 0; i < sim.pts.length; i++){
+    const p = sim.pts[i];
+    const k = 1 - i/sim.pts.length;
+    const a = .85 * k;
+    if (a <= .02) continue;
+    ctx.fillStyle = p.m
+      ? `rgba(251,191,36,${a.toFixed(3)})`
+      : `rgba(255,255,255,${a.toFixed(3)})`;
     ctx.beginPath(); ctx.arc(p.x, p.y, 2 + 3.2*k, 0, 7); ctx.fill();
   }
+
+  // 落点判定标记：绿=能进，琥珀=会打铁
+  if (sim.arrive){
+    const good = sim.scored;
+    const ax = sim.arrive.x, ay = sim.arrive.cy;
+    ctx.save();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = good ? 'rgba(74,222,128,.95)' : 'rgba(251,146,60,.95)';
+    ctx.beginPath(); ctx.arc(ax, ay, good ? 13 : 9, 0, 7); ctx.stroke();
+    if (!good){                                   // 打铁：画一个叉
+      ctx.beginPath();
+      ctx.moveTo(ax - 5, ay - 5); ctx.lineTo(ax + 5, ay + 5);
+      ctx.moveTo(ax + 5, ay - 5); ctx.lineTo(ax - 5, ay + 5);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+/* 移动篮架在命中时刻的虚影 */
+function drawHoopGhost(cx, cy, err){
+  const L = g.lv;
+  const near = err <= L.rim/2 - 4;
+  ctx.save();
+  ctx.setLineDash([6,6]);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = near ? 'rgba(74,222,128,.85)' : 'rgba(148,163,184,.55)';
+  ctx.beginPath();
+  ctx.moveTo(cx - L.rim/2, cy); ctx.lineTo(cx + L.rim/2, cy);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();                                  // 两端短竖线，标明篮圈宽度
+  ctx.moveTo(cx - L.rim/2, cy - 7); ctx.lineTo(cx - L.rim/2, cy + 7);
+  ctx.moveTo(cx + L.rim/2, cy - 7); ctx.lineTo(cx + L.rim/2, cy + 7);
+  ctx.stroke();
+  ctx.restore();
 }
 function drawTrail(){
   for(let i=0;i<g.trail.length;i++){
@@ -1361,6 +1635,14 @@ $('btnHelp').addEventListener('click', toggleHelp);
 $('btnHelp2').addEventListener('click', toggleHelp);
 $('btnHelpClose').addEventListener('click', closeHelp);
 $('ovHelp').addEventListener('click', e => { if(e.target === ui.ovHelp) closeHelp(); });  // 点背景也可关闭
+$('btnSet').addEventListener('click', setOpen);
+$('btnSetClose').addEventListener('click', closeSet);
+$('ovSet').addEventListener('click', e => { if(e.target === ui.ovSet) closeSet(); });
+$('btnHelpSet').addEventListener('click', setOpen);   // 玩法说明 → 设置
+$('btnSetHelp').addEventListener('click', toggleHelp); // 设置 → 玩法说明
+segBtns().forEach(b => {
+  b.addEventListener('click', () => setAssist(b.getAttribute('data-assist')));
+});
 $('btnSound').addEventListener('click', e => {
   muted = !muted;
   e.target.textContent = muted ? '🔇' : '🔊';
@@ -1369,6 +1651,8 @@ $('btnSound').addEventListener('click', e => {
 document.addEventListener('visibilitychange', () => { last = performance.now(); });
 
 // 球纹已在 resize() 里按 dpr 构建
+loadSettings();
+syncAssistUI();
 loadLevel(0);
 g.phase = 'menu';
 requestAnimationFrame(loop);
