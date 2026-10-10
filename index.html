@@ -264,6 +264,16 @@ const PWR = 8;             // 每像素拖拽 = 8 px/s 初速（保证满力只�
 const MAX_DRAG = MAX_SPEED / PWR;
 const LAUNCH_X = 200, LAUNCH_Y = GROUND_Y - BALL_R;
 
+/* 跳投动画：下蹲蓄力 → 起跳 → 最高点出手 → 落地 */
+const SHOULDER_DY = 38;            // 肩部相对髋部的高度
+const ARM = 36;                    // 手臂长度
+const HIP_DY = 46;                 // 髋部离地高度
+const CROUCH_T = 0.17;             // 下蹲蓄力时长(s)
+const JUMP_H = 96;                 // 起跳高度(px)
+const JUMP_V = Math.sqrt(2 * GRAVITY * JUMP_H);
+const LAND_T = 0.30;               // 落地缓冲时长(s)
+const IDLE_ARM = 0.95;             // 站立时手臂角度(朝下，贴着球)
+
 const canvas = document.getElementById('cv');
 const ctx = canvas.getContext('2d');
 let dpr = 1;
@@ -314,6 +324,8 @@ function noise(dur, vol=.1, hp=800){
   src.connect(f); f.connect(g); g.connect(a.destination); src.start();
 }
 const sfx = {
+  jump(){ tone(210, .12, 'sine', .09, 430); },
+  land(){ tone(120, .09, 'sine', .13, 62); noise(.07, .05, 900); },
   shoot(){ tone(320, .18, 'triangle', .12, 700); noise(.12,.05,1800); },
   rim(){ tone(240, .1, 'square', .07, 150); },
   bounce(){ tone(120, .09, 'sine', .12, 70); },
@@ -325,29 +337,32 @@ const sfx = {
 
 /* ─────────────────────────── 关卡 ─────────────────────────── */
 const LEVELS = [
-  { hoopX:700, hoopY:322, rim:70, time:30, par:520,  wind:0,   mover:null,                                  blocks:[],                                     tip:'按住球向后拖，松手投篮' },
-  { hoopX:800, hoopY:300, rim:68, time:30, par:560,  wind:0,   mover:null,                                  blocks:[],                                     tip:'更远更高，弧线压低一点' },
-  { hoopX:740, hoopY:300, rim:64, time:28, par:600,  wind:0,   mover:{axis:'y',amp:70,speed:1.4},            blocks:[],                                     tip:'篮架上下移动，注意提前量' },
-  { hoopX:830, hoopY:340, rim:62, time:28, par:640,  wind:100, mover:null,                                  blocks:[],                                     tip:'顺风助推，别瞄太满' },
-  { hoopX:720, hoopY:260, rim:60, time:26, par:680,  wind:-110,mover:null,                                  blocks:[{x:500,y:370,w:26,h:172}],              tip:'逆风 + 挡板，也能靠反弹得分' },
-  { hoopX:830, hoopY:300, rim:58, time:26, par:720,  wind:0,   mover:{axis:'x',amp:95,speed:1.1},            blocks:[],                                     tip:'篮架左右平移，打时间差' },
-  { hoopX:770, hoopY:270, rim:56, time:24, par:760,  wind:120, mover:{axis:'y',amp:70,speed:1.6},            blocks:[{x:590,y:440,w:26,h:102}],              tip:'风 + 上下移动 + 障碍' },
-  { hoopX:870, hoopY:240, rim:54, time:24, par:800,  wind:-80, mover:{axis:'x',amp:70,speed:1.4},            blocks:[{x:450,y:350,w:24,h:192},{x:660,y:420,w:24,h:122}], tip:'终极考验：一切都有！' }
+  { hoopX:645, hoopY:262, rim:60, time:30, par:520,  wind:0,   mover:null,                            blocks:[],                                      tip:'按住球向后拖，松手投篮' },
+  { hoopX:795, hoopY:236, rim:60, time:30, par:560,  wind:0,   mover:null,                            blocks:[],                                      tip:'更远更高，弧线压低一点' },
+  { hoopX:705, hoopY:244, rim:58, time:28, par:600,  wind:0,   mover:{axis:'y',amp:70,speed:1.4},        blocks:[],                                      tip:'篮架上下移动，注意提前量' },
+  { hoopX:858, hoopY:278, rim:54, time:28, par:640,  wind:110, mover:null,                            blocks:[],                                      tip:'顺风助推，别瞄太满' },
+  { hoopX:672, hoopY:212, rim:56, time:26, par:680,  wind:-110,mover:null,                            blocks:[{x:470,y:336,w:26,h:206}],              tip:'逆风 + 高篮 + 挡板，也能靠反弹得分' },
+  { hoopX:824, hoopY:234, rim:54, time:26, par:720,  wind:0,   mover:{axis:'x',amp:95,speed:1.1},        blocks:[],                                      tip:'篮架左右平移，打时间差' },
+  { hoopX:748, hoopY:192, rim:54, time:24, par:760,  wind:130, mover:{axis:'y',amp:80,speed:1.7},        blocks:[{x:560,y:412,w:26,h:130}],              tip:'大风 + 高位移动篮架 + 障碍' },
+  { hoopX:862, hoopY:210, rim:54, time:24, par:800,  wind:-100,mover:{axis:'x',amp:85,speed:1.6},        blocks:[{x:430,y:312,w:24,h:230},{x:640,y:396,w:24,h:146}], tip:'终极考验：一切都有！' }
 ];
 
 /* ─────────────────────────── 状态 ─────────────────────────── */
 const g = {
-  phase:'menu',            // menu | aim | fly | settle | over
+  phase:'menu',            // menu | aim | shoot | fly | settle | over
   levelIndex:0, score:0, combo:0, best:0,
   levelStars:0, totalStars:0,
   timeLeft:30,
   ball:{x:LAUNCH_X, y:LAUNCH_Y, vx:0, vy:0, rot:0, spin:0, live:true},
   aim:{active:false, px:0, py:0, sx:0, sy:0, power:0, ang:0},
+  // 跳投状态机
+  shot:{ state:'idle', t:0, y:0, vy:0, ang:-0.6, vx:0, avy:0,
+         armAng:IDLE_ARM, crouch:0, tuck:0, squash:0, stretch:0 },
   lv:{...LEVELS[0], timer:0, touchedRim:false},
   scored:false, deadTime:0, flyTime:0, slowTime:0, levelPts:0,
   trail:[], parts:[],
   shake:0, flash:0, netSway:0, netFlash:0, hoopOff:0,
-  toastTimer:0, armAng:-0.5,
+  toastTimer:0,
   swishes:0, makes:0, attempts:0, cleared:0, maxCombo:0
 };
 const STAR_BREAK = [0, 270, 300, 330];
@@ -396,6 +411,9 @@ function resetBall(){
   g.aim.active = false; g.aim.power = 0;
   g.scored = false;
   g.lv.touchedRim = false;      // 新的一球重新判定空心球
+  const s = g.shot;              // 投篮人复位
+  s.state = 'idle'; s.t = 0; s.y = 0; s.vy = 0;
+  s.armAng = IDLE_ARM; s.crouch = 0; s.tuck = 0; s.squash = 0; s.stretch = 0;
 }
 function updateLevelMotion(t, dt){
   const m = g.lv.mover;
@@ -457,22 +475,118 @@ canvas.addEventListener('pointermove', e => {
 });
 function endAim(){
   if(!g.aim.active) return;
-  g.aim.active = false;
   const dx = g.aim.sx - g.aim.px, dy = g.aim.sy - g.aim.py;
   let len = Math.hypot(dx, dy);
+  g.aim.active = false;
   if(len < 12){ g.aim.power = 0; return; }
+  // 立即算出角度/力度（快速甩投时 updateAim 可能还没跑到）
+  g.aim.power = Math.min(len, MAX_DRAG);
+  g.aim.ang = Math.atan2(-dy, dx);
   let sp = Math.min(len * PWR, MAX_SPEED);
   let vx = dx / len * sp, vy = dy / len * sp;
   if(vy > -140){ vy = -140; const k = sp/Math.max(Math.hypot(vx,vy),1); vx*=k; vy*=k; }
-  const b = g.ball;
-  b.vx = vx; b.vy = vy;
-  b.spin = vx * 0.0022;
+  // 记下这一球，进入跳投流程（起跳到最高点才真正把球投出去）
+  const s = g.shot;
+  s.state = 'crouch'; s.t = 0; s.vy = 0; s.y = 0;
+  s.ang = g.aim.ang; s.vx = vx; s.avy = vy;
+  g.phase = 'shoot';
+}
+/* 实际起跳最高点：按离散步进算出，保证预览线与真实出手点一致 */
+let jumpApex = -JUMP_H;
+function updateJumpApex(dt){
+  const step = GRAVITY * dt;
+  const n = Math.max(1, Math.ceil(JUMP_V / step));
+  let y = 0, vy = -JUMP_V;
+  for(let i = 0; i < n; i++){ vy += step; y += vy * dt; }
+  jumpApex = y;
+}
+function releaseOrigin(angDeg){
+  // 起跳最高点出手时的球心位置（预览线与实际出手点必须一致）
+  // angDeg 为仰角 θ；手臂角度 = -θ（屏幕 y 轴向下）
+  const a = -angDeg;
+  return {
+    x: LAUNCH_X + 2 + Math.cos(a) * ARM,
+    y: GROUND_Y + jumpApex - HIP_DY - SHOULDER_DY + Math.sin(a) * ARM
+  };
+}
+function handPos(){
+  const s = g.shot;
+  const hipY = -HIP_DY + s.crouch * 15;
+  return {
+    x: LAUNCH_X + 2 + Math.cos(-s.armAng) * ARM,
+    y: GROUND_Y + s.y + hipY - SHOULDER_DY + Math.sin(s.armAng) * ARM
+  };
+}
+function releaseBall(){
+  const s = g.shot, b = g.ball;
+  // 出手瞬间把手臂/下蹲精确对齐，保证出手点与预览线完全一致
+  s.armAng = -s.ang;
+  s.crouch = 0;
+  const h = handPos();
+  b.x = h.x; b.y = h.y;
+  b.vx = s.vx; b.vy = s.avy;
+  b.spin = s.vx * 0.0022;
+  s.state = 'fall';
   g.phase = 'fly';
   g.attempts++;
   g.flyTime = 0; g.slowTime = 0;
   g.trail.length = 0;
   sfx.shoot();
-  dust(g.ball.x, GROUND_Y, 6, '#cbd5e1');
+}
+function updateShoot(dt){
+  const s = g.shot;
+  updateJumpApex(dt);
+  // 状态机由 state 驱动（出手后 phase 已变成 'fly'，但人还要继续下落落地）
+  if(s.state !== 'idle'){
+    s.t += dt;
+    if(s.state === 'crouch'){
+      const h = handPos(); g.ball.x = h.x; g.ball.y = h.y;
+      if(s.t >= CROUCH_T){
+        s.state = 'rise'; s.t = 0; s.vy = -JUMP_V;
+        sfx.jump();
+      }
+    } else if(s.state === 'rise'){
+      s.vy += GRAVITY * dt;
+      s.y += s.vy * dt;
+      const h = handPos();
+      g.ball.x = h.x; g.ball.y = h.y;
+      if(s.vy >= 0) releaseBall();       // 到最高点出手
+    } else if(s.state === 'fall'){
+      s.vy += GRAVITY * dt;
+      s.y += s.vy * dt;
+      if(s.y >= 0){
+        s.y = 0; s.vy = 0; s.state = 'land'; s.t = 0; s.squash = 1;
+        sfx.land();
+        dust(LAUNCH_X, GROUND_Y, 5, '#cbd5e1');
+        g.shake = Math.max(g.shake, 2.5);
+      }
+    } else if(s.state === 'land'){
+      if(s.t >= LAND_T) s.state = 'idle';
+    }
+  }
+  // 姿态插值
+  let target = IDLE_ARM, crouch = 0, tuck = 0, stretch = 0;
+  if(g.phase === 'aim'){
+    if(g.aim.active){ target = -g.aim.ang; crouch = g.aim.power / MAX_DRAG * .75; }
+  } else if(g.phase === 'shoot'){
+    if(s.state === 'crouch'){ target = -2.0; crouch = s.t / CROUCH_T; tuck = .2; }
+    else if(s.state === 'rise'){ target = -s.ang; tuck = 1; stretch = 1; }
+    else if(s.state === 'fall'){ target = -s.ang * .35; tuck = .55; }
+    else if(s.state === 'land'){ crouch = 1 - s.t / LAND_T; tuck = .2; }
+  } else if(g.phase === 'fly'){
+    target = -s.ang * .35; tuck = .5;
+  }
+  if(s.state !== 'rise') stretch = 0;
+  s.armAng += (target - s.armAng) * Math.min(1, dt * 14);
+  s.crouch += (crouch - s.crouch) * Math.min(1, dt * 16);
+  s.tuck   += (tuck   - s.tuck)   * Math.min(1, dt * 14);
+  s.stretch = stretch;
+  s.squash  = Math.max(0, s.squash - dt / LAND_T * 1.6);
+  // 瞄准时球跟着手走（手臂抬起时球被"拿起来"）
+  if(g.phase === 'aim' && g.aim.active){
+    const h = handPos();
+    g.ball.x = h.x; g.ball.y = h.y;
+  }
 }
 canvas.addEventListener('pointerup', endAim);
 canvas.addEventListener('pointercancel', endAim);
@@ -736,7 +850,7 @@ function loop(now){
   const sdt = paused ? 0 : dt;
 
   updateLevelMotion(now/1000, sdt);
-  if(!paused) updateAim();
+  if(!paused){ updateAim(); updateShoot(dt); }
   updateParts(sdt);
 
   if(!paused){
@@ -764,7 +878,6 @@ function loop(now){
   g.flash *= Math.pow(.004, dt);
   g.netSway *= Math.pow(.05, dt);
   g.netFlash *= Math.pow(.02, dt);
-  g.armAng += ((g.aim.active ? g.aim.ang : -0.5) - g.armAng) * Math.min(1, dt*8);
 
   if(!paused){
     if(toastHideT > 0){ toastHideT -= dt; if(toastHideT <= 0) ui.toast.classList.remove('show'); }
@@ -972,39 +1085,70 @@ function drawRim(cx, cy){
   ctx.lineCap='butt';
 }
 function drawPlayer(){
-  const x = LAUNCH_X, gy = GROUND_Y;
+  const s = g.shot;
+  const x = LAUNCH_X;
+  const airborne = s.y < -0.5;
+  const gy = GROUND_Y + s.y;
+
+  // 影子（腾空时变大变淡）
+  ctx.fillStyle = `rgba(0,0,0,${airborne ? Math.max(.08, .22 + s.y * 0.0015) : .22})`;
+  ctx.beginPath();
+  ctx.ellipse(x, GROUND_Y + 2, airborne ? 26 + (-s.y) * 0.08 : 26, airborne ? 7 : 7, 0, 0, 7);
+  ctx.fill();
+
   ctx.save();
-  // 影子
-  ctx.fillStyle = 'rgba(0,0,0,.22)';
-  ctx.beginPath(); ctx.ellipse(x, gy+2, 26, 7, 0, 0, 7); ctx.fill();
+  ctx.translate(x, gy);
+  // 下蹲压扁 / 起跳拉长
+  const sy = (1 + s.squash * 0.26) * (1 - s.stretch * 0.13);
+  ctx.scale(1 + (1 - sy) * 0.42, sy);
+
+  const hipY = -HIP_DY + s.crouch * 15;
+  const footY = -s.tuck * 22;
+  const kneeX = 11 * (1 - s.tuck * 0.55);
+  const kneeY = (hipY + footY) / 2 - s.tuck * 5;
+
   // 腿
-  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 9; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(x-4, gy-46); ctx.lineTo(x-12, gy-2); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x+6, gy-46); ctx.lineTo(x+16, gy-2); ctx.stroke();
-  // 身体
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-4, hipY); ctx.lineTo(-kneeX, kneeY); ctx.lineTo(-kneeX - 3, footY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(5, hipY); ctx.lineTo(kneeX, kneeY); ctx.lineTo(kneeX + 4, footY); ctx.stroke();
+
+  // 躯干
+  const shY = hipY - SHOULDER_DY;
   ctx.fillStyle = '#2563eb';
   ctx.beginPath();
-  ctx.moveTo(x-16, gy-46); ctx.lineTo(x+16, gy-46); ctx.lineTo(x+12, gy-84); ctx.lineTo(x-12, gy-84);
+  ctx.moveTo(-15, hipY + 5); ctx.lineTo(15, hipY + 5);
+  ctx.lineTo(11, shY); ctx.lineTo(-11, shY);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#1d4ed8'; ctx.fillRect(x-16, gy-66, 32, 5);
+  ctx.fillStyle = '#1d4ed8';
+  ctx.fillRect(-15, hipY - 20, 30, 5);
+
   // 头
   ctx.fillStyle = '#f5c9a0';
-  ctx.beginPath(); ctx.arc(x, gy-99, 13, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(2, shY - 15, 13, 0, 7); ctx.fill();
   ctx.fillStyle = '#7c2d12';
-  ctx.beginPath(); ctx.arc(x, gy-105, 13, Math.PI, 0); ctx.fill();
+  ctx.beginPath(); ctx.arc(2, shY - 21, 13, Math.PI, 0); ctx.fill();
   ctx.fillStyle = '#111827';
-  ctx.beginPath(); ctx.arc(x+5, gy-97, 2.2, 0, 7); ctx.fill();
-  // 手臂（跟随瞄准角）
-  const sx = x+2, sy = gy-84;
-  const reach = 36;
-  const hx = sx + Math.cos(-g.armAng) * reach;
-  const hy = sy + Math.sin(g.armAng) * reach;
+  ctx.beginPath(); ctx.arc(7, shY - 13, 2.2, 0, 7); ctx.fill();
+
+  // 手臂（跟随瞄准 / 跳投姿势）
+  const hx = 2 + Math.cos(-s.armAng) * ARM;
+  const hy = shY + Math.sin(s.armAng) * ARM;
   ctx.strokeStyle = '#f5c9a0'; ctx.lineWidth = 8;
-  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(2, shY); ctx.lineTo(hx, hy); ctx.stroke();
   ctx.fillStyle = '#f5c9a0';
   ctx.beginPath(); ctx.arc(hx, hy, 5.5, 0, 7); ctx.fill();
-  ctx.lineCap='butt';
+
+  ctx.lineCap = 'butt';
   ctx.restore();
+
+  // 起跳/落地时的速度线
+  if(s.state === 'rise' || (airborne && s.state === 'fall')){
+    ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 2;
+    for(let i=0;i<3;i++){
+      const lx = x - 26 - i*9 + (i%2)*5;
+      ctx.beginPath(); ctx.moveTo(lx, gy - 26 + i*9); ctx.lineTo(lx - 12, gy - 20 + i*9); ctx.stroke();
+    }
+  }
 }
 function drawAim(){
   const dx = g.aim.sx - g.aim.px, dy = g.aim.sy - g.aim.py;
@@ -1036,8 +1180,12 @@ function drawAim(){
   ctx.beginPath(); ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, -Math.PI/2 + Math.PI*2*(pw/MAX_DRAG)); ctx.stroke();
   ctx.restore();
 
-  // 抛物线预览
-  const pts = predict(g.ball.x, g.ball.y, vx, vy);
+  // 抛物线预览（从起跳最高点的实际出手位置开始算）
+  const o = releaseOrigin(g.aim.ang);
+  const pts = predict(o.x, o.y, vx, vy);
+  // 出手点标记
+  ctx.fillStyle = 'rgba(253,224,71,.9)';
+  ctx.beginPath(); ctx.arc(o.x, o.y, 3.5, 0, 7); ctx.fill();
   for(let i=0;i<pts.length;i++){
     const p = pts[i];
     const k = 1 - i/pts.length;
