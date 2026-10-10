@@ -134,6 +134,16 @@
   .hints{display:flex; gap:8px; justify-content:center; margin-top:14px; flex-wrap:wrap}
   .hint{font-size:11px; opacity:.5; padding:5px 10px; border-radius:999px; border:1px dashed rgba(148,163,184,.3)}
 
+  /* 页脚：GitHub 链接 + 版权 */
+  .foot{display:flex; align-items:center; justify-content:center; gap:12px;
+    flex-wrap:wrap; margin-top:12px; font-size:11.5px; opacity:.42; letter-spacing:.3px}
+  .foot a{color:#cbd5e1; text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+    padding:4px 11px; border-radius:999px; border:1px solid rgba(148,163,184,.25);
+    transition:opacity .2s, background .2s, border-color .2s}
+  .foot a:hover{opacity:1; background:rgba(148,163,184,.14); border-color:rgba(148,163,184,.5)}
+  .foot a:focus-visible{outline:2px solid #4ade80; outline-offset:2px; opacity:1}
+  .foot svg{width:14px; height:14px; fill:currentColor; flex:none}
+
   /* 玩法说明面板 */
   .card.help{width:min(94%, 470px); text-align:left; max-height:92%; overflow-y:auto}
   .card.help h2{text-align:center; margin-bottom:14px}
@@ -301,6 +311,15 @@
     <div class="hint">R 键重开</div>
     <div class="hint">? 玩法 · ⚙ 辅助线设置</div>
   </div>
+
+  <div class="foot">
+    <a href="https://github.com/kevinvane/MiniGamesBasketball" target="_blank" rel="noopener noreferrer"
+       title="在 GitHub 上查看源码、提 Issue 或 Star">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>GitHub</span>
+    </a>
+    <span>© 2026 kevinvane · MIT License</span>
+  </div>
 </div>
 
 <script>
@@ -333,15 +352,21 @@ const RISE_T = Math.ceil(JUMP_V / (GRAVITY / 60)) / 60;
 const RELEASE_DELAY = CROUCH_T + RISE_T;
 
 const canvas = document.getElementById('cv');
-const ctx = canvas.getContext('2d');
+let ctx = canvas.getContext('2d');     // 用 let：烘焙场景时要临时把它指向离屏画布
 let dpr = 1;
 let ballTex = null, ballTexR = 0;      // 球体贴图（resize 时构建，必须先于 resize 声明）
+let sceneTex = null;                   // 场景离屏图（天空+围栏+地面+球场标线）
+let lightHL = null, lightRim = null;   // 球的光照层渐变（缓存复用，不逐帧新建）
 function resize(){
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = W * dpr; canvas.height = H * dpr;
   canvas.style.aspectRatio = W + '/' + H;
   ctx.setTransform(dpr,0,0,dpr,0,0);
-  if(typeof buildBallTexture === 'function' && dpr) buildBallTexture();   // 高分屏下重建更清晰的球纹
+  if(dpr){
+    if(typeof buildBallTexture === 'function') buildBallTexture();   // 高分屏下重建更清晰的球纹
+    if(typeof buildSceneTexture  === 'function') buildSceneTexture(); // 背景同样按 dpr 重建，避免糊
+    if(typeof buildBallLight     === 'function') buildBallLight();    // 光照层同理
+  }
 }
 resize();
 window.addEventListener('resize', resize);
@@ -1112,13 +1137,15 @@ function render(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,W,H);
 
+  /* 背景：天空 + 围栏 + 地面 + 球场标线全是常量绘制，已烘焙成一张离屏图，
+     每帧只剩 1 次 drawImage。刻意画在抖动位移**之外** —— 抖的是场景不是天空，
+     顺带消掉了每次碰撞时背景平移露出画布底色的边缘缺口。 */
+  if(sceneTex) ctx.drawImage(sceneTex, 0, 0, W, H);
+  else { drawSky(); drawFence(); drawGround(); }
+
   const sh = g.shake;
   ctx.save();
   if(sh > .3) ctx.translate((Math.random()-.5)*sh, (Math.random()-.5)*sh);
-
-  drawSky();
-  drawFence();
-  drawGround();
 
   const {cx, cy} = rimCenters();
   drawHoopStructure(cx, cy);
@@ -1211,6 +1238,27 @@ function drawGround(){
   // 三分弧
   ctx.strokeStyle = 'rgba(255,255,255,.18)';
   ctx.beginPath(); ctx.arc(LAUNCH_X+40, GROUND_Y, 300, -Math.PI*0.62, -Math.PI*0.38); ctx.stroke();
+}
+
+/* ── 场景层离屏烘焙 ──────────────────────────────
+   上面这三个函数一帧要付出约 80 次路径调用（2 个渐变 + 6 朵云 ×4 arc
+   + 远山约 24 次 lineTo + 围栏 + 地面渐变 + 标线），而它们画的全是常量，
+   一帧之内没有任何随时间或随关卡变化的量。于是整层一次性烘焙进离屏图，
+   每帧只剩 1 次 drawImage。
+   离屏图画布按 dpr 放大，绘制时仍用逻辑坐标，resize 时重建。 */
+function buildSceneTexture(){
+  if(!sceneTex) sceneTex = document.createElement('canvas');
+  sceneTex.width  = Math.max(1, Math.round(W * dpr));
+  sceneTex.height = Math.max(1, Math.round(H * dpr));
+  const c = sceneTex.getContext('2d');
+  if(!c){ sceneTex = null; return; }     // 拿不到 2D 上下文就作废，render() 会走逐帧绘制的兜底分支
+  c.setTransform(dpr,0,0,dpr,0,0);
+  c.clearRect(0,0,W,H);
+  // 临时把 ctx 指向离屏画布，复用上面三个绘制函数，避免把同一段代码抄两份
+  const main = ctx;
+  ctx = c;
+  try { drawSky(); drawFence(); drawGround(); }
+  finally { ctx = main; }
 }
 function drawBlock(b){
   const gr = ctx.createLinearGradient(b.x, b.y, b.x+b.w, b.y+b.h);
@@ -1562,6 +1610,26 @@ function buildBallTexture(){
   ballTex = cv;
   ballTexR = R;
 }
+
+/* ── 球的光照层渐变缓存 ──────────────────────────────
+   高光 / 暗角两个径向渐变尺寸恒定、只跟着球平移，逐帧新建纯属浪费。
+   渐变在「原点坐标系」里建一次，之后 save/translate 平移复用即可。
+
+   为什么不用离屏图 + drawImage：那样会多经一层 8bit 预乘 alpha 中转，
+   实测球体上会出现最大 Δ85 的可见色差（见路线图 P0-2 记录）。
+   渐变按「绘制时」的 CTM 解释，所以缓存 + translate 才是真正无损的：
+   实测与逐帧按绝对坐标新建渐变逐像素完全相同。                      */
+function buildBallLight(){
+  lightHL = ctx.createRadialGradient(-BALL_R*.36, -BALL_R*.42, BALL_R*.04, 0, 0, BALL_R*1.15);
+  lightHL.addColorStop(0,  'rgba(255,244,214,.50)');
+  lightHL.addColorStop(.3, 'rgba(255,226,170,.16)');
+  lightHL.addColorStop(1,  'rgba(255,200,120,0)');
+
+  lightRim = ctx.createRadialGradient(0, 0, BALL_R*.5, 0, 0, BALL_R);
+  lightRim.addColorStop(0,   'rgba(70,24,0,0)');
+  lightRim.addColorStop(.72, 'rgba(70,24,0,.10)');
+  lightRim.addColorStop(1,   'rgba(38,10,0,.46)');
+}
 function drawBall(){
   const b = g.ball;
   if(!b.live || !ballTex) return;
@@ -1581,25 +1649,15 @@ function drawBall(){
   ctx.drawImage(ballTex, -BALL_R, -BALL_R, BALL_R*2, BALL_R*2);
   ctx.restore();
 
-  // 光照层：不随球旋转，高光恒定来自左上方
+  // 光照层：不随球旋转，高光恒定来自左上方（渐变已缓存，靠 translate 平移复用）
   ctx.save();
-  const hl = ctx.createRadialGradient(b.x - BALL_R*.36, b.y - BALL_R*.42, BALL_R*.04,
-                                      b.x, b.y, BALL_R*1.15);
-  hl.addColorStop(0,  'rgba(255,244,214,.50)');
-  hl.addColorStop(.3, 'rgba(255,226,170,.16)');
-  hl.addColorStop(1,  'rgba(255,200,120,0)');
-  ctx.fillStyle = hl;
-  ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R*1.15, 0, 7); ctx.fill();
-
-  const rim = ctx.createRadialGradient(b.x, b.y, BALL_R*.5, b.x, b.y, BALL_R);
-  rim.addColorStop(0,   'rgba(70,24,0,0)');
-  rim.addColorStop(.72, 'rgba(70,24,0,.10)');
-  rim.addColorStop(1,   'rgba(38,10,0,.46)');
-  ctx.fillStyle = rim;
-  ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R, 0, 7); ctx.fill();
-
+  ctx.translate(b.x, b.y);
+  ctx.fillStyle = lightHL;
+  ctx.beginPath(); ctx.arc(0, 0, BALL_R*1.15, 0, 7); ctx.fill();
+  ctx.fillStyle = lightRim;
+  ctx.beginPath(); ctx.arc(0, 0, BALL_R, 0, 7); ctx.fill();
   ctx.strokeStyle = 'rgba(60,24,4,.75)'; ctx.lineWidth = 1.4;
-  ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R - .7, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, BALL_R - .7, 0, 7); ctx.stroke();
   ctx.restore();
 }
 function drawParts(){
