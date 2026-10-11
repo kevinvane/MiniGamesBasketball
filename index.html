@@ -878,7 +878,15 @@ function gainLife(){
 /* 时间耗尽仍未达标：扣 1 颗心。扣完心在下一关的入口结算（见 advanceLevel）。 */
 function loseLife(){
   if (g.mode === MODE_CAMPAIGN) return;
-  g.lives--;
+  /* 必须夹到 0，不能让 lives 变成负数。
+     下界原本靠 advanceLevel 里的 `g.lives <= 0` 兜住，但那是**下游**兜底：
+     任何一条能重复调用 loseLife() 的路径（同一帧里 advanceLevel 被调两次、
+     或者将来新增的调用点）都会让 lives 穿过 0 变成 -1。
+     一旦为负，updateHUD 的 '❤'.repeat(g.lives) 直接抛 RangeError，
+     整个 render 循环挂掉 —— 表现是「玩到一半整页白屏 / 控制台报 repeat count must be
+     non-negative」，而且是在按了「再来一局」之后才炸，跟真正的原因隔了好几层，很难查。
+     不变量应该在**写入点**成立，而不是指望每个下游都记得检查。 */
+  g.lives = Math.max(0, g.lives - 1);
   showToast('未达标 · 生命 -1', '#f87171', 22);
   sfx.miss();
 }
@@ -1524,14 +1532,17 @@ function updateHUD(){
   ui.wind.textContent = '风 ' + (w>0?'→':'←') + ' ' + Math.abs(w);
   ui.wind.className = 'pill' + (w ? ' warn' : '');
   ui.timer.style.color = g.timeLeft <= 5 ? '#f87171' : '';
-  /* 生命只在无尽 / 每日显示；战役没有命，所以整个胶囊隐藏而不是显示 3 颗假心 */
+  /* 生命只在无尽 / 每日显示；战役没有命，所以整个胶囊隐藏而不是显示 3 颗假心。
+     渲染层再夹一次：repeat() 的参数为负会抛 RangeError 并把整个 render 循环带崩，
+     一个显示错误不该升级成「游戏卡死」。 */
   const lp = ui.life;
+  const lv = Math.max(0, Math.min(LIVES_MAX, g.lives | 0));
   if (g.mode === MODE_CAMPAIGN){
     lp.style.display = 'none';
   } else {
     lp.style.display = '';
-    lp.textContent = '❤'.repeat(g.lives) + '♡'.repeat(LIVES_MAX - g.lives);
-    lp.className = 'pill' + (g.lives <= 1 ? ' warn' : '');
+    lp.textContent = '❤'.repeat(lv) + '♡'.repeat(LIVES_MAX - lv);
+    lp.className = 'pill' + (lv <= 1 ? ' warn' : '');
   }
 }
 /* 每日挑战结算：连胜只认「今天 / 昨天」，当天重复完成不再累加 */
@@ -1577,8 +1588,11 @@ function showEnd(win){
                           : g.mode === MODE_DAILY   ? '📅 每日新纪录'
                           : '🏅 新纪录';
   ui.recBadge.classList.toggle('show', beatMode);
+  // 上下界都要夹：原来只夹了下界（Math.max(0, ...)），上界没夹 ——
+  // lives 一旦大于 LIVES_MAX，'♡'.repeat(LIVES_MAX - lives) 就是负数，直接抛 RangeError。
+  const endLv = Math.max(0, Math.min(LIVES_MAX, g.lives | 0));
   ui.endStars.textContent = g.mode === MODE_CAMPAIGN ? starRow(g.totalStars)
-                          : '❤'.repeat(Math.max(0, g.lives)) + '♡'.repeat(LIVES_MAX - Math.max(0, g.lives));
+                          : '❤'.repeat(endLv) + '♡'.repeat(LIVES_MAX - endLv);
   ui.endInfo.innerHTML = endInfoHTML();
   /* 结算卡片底部的历史行：本局与历史纪录的关系一眼可见 */
   ui.endRec.innerHTML = endRecHTML(beatStars);
@@ -1591,10 +1605,10 @@ function endInfoHTML(){
   const common = `<br/><span style="opacity:.55;font-size:12px">命中率 ${g.attempts? Math.round(g.makes/g.attempts*100):0}% · 最高连击 ${g.maxCombo} · 空心 ${g.swishes}</span>`;
   if (g.mode === MODE_ENDLESS)
     return `撑到第 <b>${g.levelIndex + 1}</b> 波 · 过关 <b>${g.cleared}</b> 波
-      <br/>命中 <b>${g.makes}</b> 次 · 剩余生命 <b>${Math.max(0, g.lives)}</b> ❤${common}`;
+      <br/>命中 <b>${g.makes}</b> 次 · 剩余生命 <b>${Math.max(0, Math.min(LIVES_MAX, g.lives | 0))}</b> ❤${common}`;
   if (g.mode === MODE_DAILY)
     return `${g.won ? '走完全部 3 关' : '生命耗尽'} · 过关 <b>${g.cleared}</b>/3 关
-      <br/>命中 <b>${g.makes}</b> 次 · 剩余生命 <b>${Math.max(0, g.lives)}</b> ❤${common}`;
+      <br/>命中 <b>${g.makes}</b> 次 · 剩余生命 <b>${Math.max(0, Math.min(LIVES_MAX, g.lives | 0))}</b> ❤${common}`;
   return `过关 <b>${g.cleared}</b> / ${LEVELS.length} 关
     <br/>命中 <b>${g.makes}</b> 次 · 空心 <b>${g.swishes}</b> 次 · 最高单球 <b>${g.best}</b> 分${common}`;
 }

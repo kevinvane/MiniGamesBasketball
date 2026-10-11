@@ -81,7 +81,33 @@ head('A3. 生命：达标回血 / 超时扣命 / 上限封顶');
 
   G.lives = 2;  h.win.__loseLife();  ok(G.lives === 1, '2 颗心 → 超时 → 1 颗');
   h.win.__loseLife();                ok(G.lives === 0, '1 颗心 → 超时 → 0 颗');
-  h.win.__loseLife();                ok(G.lives === -1, '扣到 0 之下不再夹（由 advanceLevel 判定结束），实际=' + G.lives);
+}
+{
+  /* 不变量必须在**写入点**成立，而不是靠下游记得检查。
+     早前 loseLife() 是无下界夹取的 g.lives--，一旦 lives 穿过 0 变成 -1，
+     updateHUD 里的 '❤'.repeat(g.lives) 就抛 RangeError，把整个 render 循环带崩 ——
+     症状是「按了再来一局之后整页报错」，跟真正的原因隔了好几层，极难定位。
+     这里直接连续扣到负数区间，要求 stays == 0。 */
+  const h = run(MODE.endless);
+  const G = h.win.__G;
+  G.lives = 1;
+  for (let i = 0; i < 8; i++) h.win.__loseLife();
+  ok(G.lives === 0, '连扣 8 次也不会跌破 0，实际=' + G.lives);
+  frames(h, 3);
+  ok(h.els['lifePill'].textContent === '♡♡♡', 'lives=0 时胶囊显示 3 个空心，实际=' + h.els['lifePill'].textContent);
+}
+{
+  /* 渲染层自己也要能扛住越界输入 —— 显示错误不该升级成「游戏卡死」。 */
+  const h = run(MODE.endless);
+  const G = h.win.__G, MAX = h.win.__LIVES_MAX;
+  let threw = null;
+  for (const bad of [-1, -99, MAX + 1, 999, NaN]){
+    G.lives = bad;
+    try { frames(h, 2); } catch (e){ threw = bad + ' → ' + e.message; break; }
+  }
+  ok(!threw, 'HUD 遇到越界 lives 不抛异常' + (threw ? '：' + threw : ''));
+  G.lives = 1; frames(h, 2);
+  ok(h.els['lifePill'].textContent === '❤♡♡', '恢复正常值后显示正确，实际=' + h.els['lifePill'].textContent);
 }
 {
   // 战役不该有命
