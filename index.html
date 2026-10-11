@@ -1954,6 +1954,39 @@ function drawPlayer(){
     }
   }
 }
+/* ─────────────────────────── 瞄准辅助的配色 ─────────────────────────── */
+/* 力度环：绿 → 青柠 → 黄 → 琥珀 → 橙 → 深橙 → 红，沿整圈归一化位置连续插值。
+   停点位置是按**实际出球力度区间**调的，不是按 0~100% 均匀分的：
+   实测一杆典型球 `sp≈1050` → 拖 131px → k≈0.69，战役里 sp 多在 900~1520，
+   也就是 k 基本落在 0.6~1.0。所以橙色必须在这个区间内就推得出去 ——
+   第一版把橙放在 0.75、深橙 1.0，结果绝大多数球只走到黄，
+   看上去就是「整个环偏绿、80% 才冒出一点橙」。
+   现在：50% 就进琥珀、62% 出橙、80% 进深橙、90% 变红。
+   取 t 是「这一小段在整圈里的位置」而不是「当前力度」——
+   拉到一半时前缘正好落在琥珀，拉满时整圈走完一整条光谱。 */
+const PW_RAMP = [
+  [0,    0x22, 0xc5, 0x5e],   // 绿     0%
+  [0.20, 0xa3, 0xe6, 0x35],   // 青柠  20%
+  [0.35, 0xfa, 0xcc, 0x15],   // 黄    35%
+  [0.52, 0xfb, 0xbf, 0x24],   // 琥珀  52%
+  [0.68, 0xfb, 0x92, 0x3c],   // 橙    68%
+  [0.85, 0xf9, 0x73, 0x16],   // 深橙  85%
+  [1,    0xdc, 0x26, 0x26]    // 红   100%
+];
+function powerColor(t){
+  if (t <= 0) t = 0;
+  for (let i = 1; i < PW_RAMP.length; i++){
+    if (t <= PW_RAMP[i][0] || i === PW_RAMP.length - 1){
+      const p = PW_RAMP[i-1], q = PW_RAMP[i];
+      const k = (t - p[0]) / (q[0] - p[0]);
+      return 'rgb(' + Math.round(p[1] + (q[1]-p[1])*k) + ',' +
+                      Math.round(p[2] + (q[2]-p[2])*k) + ',' +
+                      Math.round(p[3] + (q[3]-p[3])*k) + ')';
+    }
+  }
+  return 'rgb(220,38,38)';
+}
+
 function drawAim(){
   const L = g.lv;
   const dx = g.aim.sx - g.aim.px, dy = g.aim.sy - g.aim.py;
@@ -1976,20 +2009,24 @@ function drawAim(){
   ctx.restore();
 
   // 力度环
-  /* 三段阈值必须按 MAX_DRAG 取比例，不能写死像素值。
-     g.aim.power 在 updateAim() 与 endAim() 里都被 Math.min(len, MAX_DRAG) 夹住，
-     而 MAX_DRAG = MAX_SPEED / PWR = 190 —— 早前这里写的是
-     `pw > 260 ? 红 : pw > 170 ? 黄 : 绿`：
-     260 比量程上限还大，红色**永远画不出来**；绿色又吃掉 0~170（89% 的量程），
-     于是整个环几乎恒绿，只在顶端闪一下黄。
-     现在按比例切：0~45% 绿 / 45~75% 黄 / 75~100% 红。 */
-  const pw = g.aim.power, pwK = pw / MAX_DRAG;
+  /* 整条弧用**同一个颜色**，颜色随力度连续变化：弧长编码力度，颜色是冗余提示。
+     之前沿整圈铺一条绿→红光谱，看上去更「漂亮」，但弧的起点永远压着一段绿 ——
+     拉到 80% 时可见弧里仍有 52% 是绿到琥珀，绿就成了表盘的底色，
+     「这条有多热」这件事被空间位置冲淡了。
+     统一色之后：弧画到哪里就是什么色，绿不会在底座上占位。
+     顺带从 20 段切片退回 1 次 arc —— 顺时针那圈渐变本来也没带来额外信息。
+     取 t = 整条弧的归一化长度，也就是当前力度，所以前缘颜色即力度色。 */
+  const pw = g.aim.power, pwK = Math.max(0, Math.min(1, pw / MAX_DRAG));
   ctx.save();
   ctx.lineWidth = 6;
   ctx.strokeStyle = 'rgba(15,23,42,.35)';
   ctx.beginPath(); ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, Math.PI*1.5); ctx.stroke();
-  ctx.strokeStyle = pwK > 0.75 ? '#ef4444' : pwK > 0.45 ? '#f59e0b' : '#22c55e';
-  ctx.beginPath(); ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, -Math.PI/2 + Math.PI*2*pwK); ctx.stroke();
+  if (pwK > 0.004){                       // 太短时画出来只是个点，直接跳过
+    ctx.strokeStyle = powerColor(pwK);
+    ctx.beginPath();
+    ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, -Math.PI/2 + Math.PI*2*pwK);
+    ctx.stroke();
+  }
   ctx.restore();
 
   // ── 瞄准辅助 ──────────────────────────────
