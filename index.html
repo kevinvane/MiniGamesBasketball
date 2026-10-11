@@ -48,6 +48,28 @@
     display:flex; align-items:center; gap:6px;
   }
   .pill.warn{background:rgba(239,68,68,.18); border-color:rgba(239,68,68,.45); color:#fca5a5}
+  /* 存档纪录：开局卡片的历史行 / 结算卡片的新纪录徽章 / HUD 里的「超越上一局」瞬时提示 */
+  .rec-line{
+    margin:12px 0 0; padding:9px 13px; border-radius:11px; text-align:center;
+    background:rgba(250,204,21,.1); border:1px solid rgba(250,204,21,.3);
+    font-size:12.5px; line-height:1.65; color:#fde68a;
+  }
+  .rec-line b{font-size:14px}
+  /* 用 display 而非 opacity 隐藏：只写 opacity:0 的话元素仍占位，
+     没有新纪录时结算卡片中间会留一道莫名的空隙。淡入改由动画承担。 */
+  .rec-badge{
+    display:none; margin-top:4px; font-size:14px; font-weight:800; letter-spacing:1.5px; color:#facc15;
+    text-shadow:0 2px 14px rgba(250,204,21,.5);
+  }
+  .rec-badge.show{display:block; animation:badgeIn .3s ease}
+  @keyframes badgeIn{from{opacity:0; transform:translateY(-4px)}to{opacity:1; transform:translateY(0)}}
+  .pill.beat{
+    display:none; align-items:center; gap:5px; white-space:nowrap;
+    padding:6px 13px; font-size:12.5px; font-weight:800;
+    background:rgba(250,204,21,.2); border-color:rgba(250,204,21,.55); color:#fde68a;
+  }
+  .pill.beat.show{display:flex; animation:beatIn .3s cubic-bezier(.2,1.5,.4,1)}
+  @keyframes beatIn{from{opacity:0; transform:scale(.8)}to{opacity:1; transform:scale(1)}}
   .stars{letter-spacing:2px; font-size:16px; color:#fbbf24}
   .bar-wrap{
     position:relative; min-width:150px; height:30px; padding:0 4px;
@@ -198,6 +220,7 @@
     </div>
     <div class="stars" id="stars">☆☆☆</div>
     <div class="spacer"></div>
+    <span class="pill beat" id="beatPill" aria-live="polite"></span>
     <div class="pill" id="windPill">风 0.0</div>
     <button class="btn ghost" id="btnSound">🔊</button>
     <button class="btn ghost" id="btnRestart">重开</button>
@@ -218,6 +241,7 @@
         </div>
         <p style="opacity:.6;font-size:12.5px">拖得越远力量越大，方向决定弧线；<br/>空心入网有额外奖励，注意风力和移动篮架。</p>
         <p style="opacity:.55;font-size:12px"><b style="color:#fbbf24">瞄准辅助默认是「抛物线」</b>——初级提示；<br/>投不准可去 <b>⚙ 设置</b> 换成「弹道预览」或关掉辅助，选择会记住。</p>
+        <div class="rec-line" id="recLine"></div>
         <div class="row">
           <button class="btn" id="btnStart">开始游戏</button>
           <button class="btn ghost" id="btnHelp2">玩法说明</button>
@@ -228,8 +252,10 @@
       <div class="card">
         <h2 id="endTitle">时间到！</h2>
         <div class="big" id="endScore">0</div>
+        <div class="rec-badge" id="recBadge">🏅 新纪录</div>
         <p id="endStars" class="stars" style="font-size:24px">☆☆☆</p>
         <p id="endInfo"></p>
+        <div class="rec-line" id="endRec"></div>
         <div class="row">
           <button class="btn" id="btnAgain">再来一局</button>
           <button class="btn ghost" id="btnClose">看看场地</button>
@@ -377,7 +403,8 @@ const ui = {
   par:$('par'), bar:$('bar'),
   wind:$('windPill'), toast:$('toast'), ovStart:$('ovStart'), ovEnd:$('ovEnd'),
   endTitle:$('endTitle'), endScore:$('endScore'), endStars:$('endStars'), endInfo:$('endInfo'),
-  ovHelp:$('ovHelp'), ovSet:$('ovSet'), assistHint:$('assistHint')
+  ovHelp:$('ovHelp'), ovSet:$('ovSet'), assistHint:$('assistHint'),
+  beatPill:$('beatPill'), recLine:$('recLine'), recBadge:$('recBadge'), endRec:$('endRec')
 };
 
 /* ── 设置 ──
@@ -421,6 +448,56 @@ function setAssist(v){
 }
 function isPaused(){
   return ui.ovHelp.classList.contains('show') || ui.ovSet.classList.contains('show');
+}
+
+/* ── 存档 ──
+   沿用 P0-1 的落库范式：单一 key + 整体 JSON + try/catch + 白名单校验。
+   这里额外要求「**坏字段只丢该字段，不整份作废**」——存档是玩家攒出来的，
+   因为 stars 存成了字符串就把 best 一起清掉，是不可接受的。
+   校验用 typeof + Number.isFinite 而不是 isFinite：后者对 '123' 这类脏数据
+   会先隐式转换再判为合法，等于把字符串当数字写回去。                    */
+const REC_KEY = 'nulan.record';
+const REC_DEF = { best:0, stars:0, clears:0, plays:0, last:0 };
+const REC = { ...REC_DEF };
+/* 上限用来挡掉手改 / 写入被截断造成的天文数字 */
+const REC_MAX = { best:9999999, stars:99, clears:99999, plays:99999, last:9999999 };
+function recInt(v, max){
+  if(typeof v !== 'number' || !Number.isFinite(v)) return null;
+  const n = Math.floor(v);
+  if(n < 0 || n > max) return null;
+  return n;
+}
+function loadRecord(){
+  let raw;
+  try { raw = localStorage.getItem(REC_KEY); }
+  catch (e) { return; }        // 隐私模式 / 存储不可用：保持默认值，游戏照常
+  if(!raw) return;
+  let obj;
+  try { obj = JSON.parse(raw); }
+  catch (e) { return; }        // 存档损坏：同样只回落默认值
+  if(!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+  for(const k in REC_DEF){
+    const v = recInt(obj[k], REC_MAX[k]);
+    if(v !== null) REC[k] = v; // 逐字段校验，合法字段照常恢复，坏的单独丢弃
+  }
+}
+function saveRecord(){
+  try { localStorage.setItem(REC_KEY, JSON.stringify(REC)); }
+  catch (e) { /* 配额满 / 隐私模式：这次成绩不落库，不影响本局游戏 */ }
+}
+/* 开局卡片的历史行。有存档才显示，避免首次进入摆一行「最高 0 分」吓人 */
+function syncRecordUI(){
+  if(!REC.plays && !REC.best){
+    ui.recLine.innerHTML = '';
+    ui.recLine.style.display = 'none';
+    return;
+  }
+  ui.recLine.style.display = '';
+  const stars = REC.stars;
+  const starTxt = `最佳 <b>${stars}</b>/${LEVELS.length * 3} ★`;
+  const clearTxt = REC.clears > 0 ? ` · 全通关 <b>${REC.clears}</b> 次` : '';
+  ui.recLine.innerHTML =
+    `🏅 最高 <b>${REC.best}</b> 分 · ${starTxt}${clearTxt} · 第 <b>${REC.plays}</b> 局`;
 }
 
 /* ─────────────────────────── 音效 ─────────────────────────── */
@@ -491,7 +568,8 @@ const g = {
   trail:[], parts:[],
   shake:0, flash:0, netSway:0, netFlash:0, hoopOff:0,
   toastTimer:0,
-  swishes:0, makes:0, attempts:0, cleared:0, maxCombo:0
+  swishes:0, makes:0, attempts:0, cleared:0, maxCombo:0,
+  beatPrev:false          // 本局是否已越过上一局分数（「超越上一局」每局只提示一次）
 };
 const STAR_BREAK = [0, 270, 300, 330];
 
@@ -521,6 +599,7 @@ function advanceLevel(cleared){
     g.score += bonus;
     g.cleared++;
     showToast2(`过关时间奖励 +${bonus}`, '#fde68a');
+    checkBeatPrev();          // 过关奖励也会把总分推过上一局
   }
   g.totalStars += g.levelStars;
   if(g.levelIndex + 1 < LEVELS.length){
@@ -642,8 +721,12 @@ function endAim(){
 /* 实际起跳最高点：按离散步进算出，保证预览线与真实出手点一致 */
 let jumpApex = -JUMP_H;
 function updateJumpApex(dt){
+  // dt 必须为正：下面 n = ceil(JUMP_V / step) 在 step=0 时会得到 Infinity，
+  // for(;;) 直接把标签页卡死。dt 来自 (now-last)/1000，
+  // 同帧时间戳相等（以及 visibilitychange 后首帧撞上）就会算出 0。
+  if(!(dt > 0)) return;
   const step = GRAVITY * dt;
-  const n = Math.max(1, Math.ceil(JUMP_V / step));
+  const n = Math.max(1, Math.min(4096, Math.ceil(JUMP_V / step)));
   let y = 0, vy = -JUMP_V;
   for(let i = 0; i < n; i++){ vy += step; y += vy * dt; }
   jumpApex = y;
@@ -984,7 +1067,21 @@ function onScore(){
   if(g.combo > 1) msg += ` x${g.combo} 连击`;
   showToast(msg, swish ? '#facc15' : '#4ade80', 30);
   showToast2(`+${pts}`, swish ? '#fde68a' : '#bbf7d0');
+  checkBeatPrev();
   /* 注意：这里不要切到 settle，球要继续自然下落、落地，落地后才结算下一球 */
+}
+/* 「超越上一局」——本局总分越过 REC.last 的那一刻，在 HUD 上给一次瞬时提示。
+   两处加分口（进球 / 过关时间奖励）都走这里，保证不会漏判；
+   g.beatPrev 保证一局只响一次，否则连击时每球都闪。                    */
+let beatTid = 0;
+function checkBeatPrev(){
+  if(g.beatPrev || !REC.last) return;
+  if(g.score <= REC.last) return;
+  g.beatPrev = true;
+  ui.beatPill.textContent = '🔥 超越上一局！';
+  ui.beatPill.classList.add('show');
+  clearTimeout(beatTid);          // 连击时不会堆出多个定时器
+  beatTid = setTimeout(() => ui.beatPill.classList.remove('show'), 2600);
 }
 function miss(){
   g.combo = 0;
@@ -1073,20 +1170,40 @@ function updateHUD(){
   ui.timer.style.color = g.timeLeft <= 5 ? '#f87171' : '';
 }
 function showEnd(win){
+  /* 先算「是否破纪录」再落库：REC.best 一旦被本局覆盖就分不清是不是新纪录了。
+     首局没有纪录可破，此时不该弹「新纪录」——否则每个人第一次玩都拿徽章，徽章就不值钱了。 */
+  const beatBest = REC.best > 0 && g.score > REC.best;
+  const beatStars = REC.stars > 0 && g.totalStars > REC.stars;
+  REC.best  = Math.max(REC.best, g.score);
+  REC.stars = Math.max(REC.stars, g.totalStars);
+  if(win) REC.clears++;
+  REC.last = g.score;
+  saveRecord();
+
   ui.ovEnd.classList.add('show');
   ui.endTitle.textContent = win ? '🏆 全部通关！' : '⏰ 挑战结束';
   ui.endScore.textContent = g.score;
+  ui.recBadge.classList.toggle('show', beatBest);
   const s = Math.min(3, Math.round(g.totalStars / LEVELS.length * 3));
   ui.endStars.textContent = '★'.repeat(s) + '☆'.repeat(3-s);
   ui.endInfo.innerHTML = `过关 <b>${g.cleared}</b> / ${LEVELS.length} 关
     <br/>命中 <b>${g.makes}</b> 次 · 空心 <b>${g.swishes}</b> 次 · 最高单球 <b>${g.best}</b> 分
     <br/><span style="opacity:.55;font-size:12px">命中率 ${g.attempts? Math.round(g.makes/g.attempts*100):0}% · 最高连击 ${g.maxCombo}</span>`;
+  /* 结算卡片底部的历史行：本局与历史纪录的关系一眼可见 */
+  const parts = [`历史最高 <b>${REC.best}</b>`];
+  if(beatStars) parts.push('<b style="color:#fde68a">星级刷新</b>');
+  parts.push(`累计通关 <b>${REC.clears}</b> 次`);
+  parts.push(`第 <b>${REC.plays}</b> 局`);
+  ui.endRec.innerHTML = parts.join(' · ');
 }
 
 /* ─────────────────────────── 主循环 ─────────────────────────── */
 let last = performance.now();
 function loop(now){
-  const dt = Math.min((now - last)/1000, 1/30);
+  // 下界夹到 0：时间戳回退时 dt 会是负数，物理会倒着走。
+  // 上界 1/30 是原有的防跳帧。上界不动，避免改变正常帧下的手感与数值。
+  // （dt=0 本身是安全的：updateJumpApex 内部已挡掉，见该函数注释。）
+  const dt = Math.min(Math.max((now - last)/1000, 0), 1/30);
   last = now;
   const paused = isPaused();   // 打开玩法/设置面板时暂停整个游戏
   const sdt = paused ? 0 : dt;
@@ -1681,6 +1798,12 @@ function startGame(){
   g.levelIndex = 0; g.score = 0; g.totalStars = 0; g.combo = 0; g.best = 0;
   g.cleared = 0; g.maxCombo = 0;
   g.swishes = 0; g.makes = 0; g.attempts = 0;
+  g.beatPrev = false;
+  REC.plays++;
+  saveRecord();               // 开局就计数：中途刷新也算打过一局
+  clearTimeout(beatTid);     // 上一局遗留的「超越上一局」定时器不该带进这一局
+  ui.beatPill.classList.remove('show');
+  ui.recBadge.classList.remove('show');
   ui.ovStart.classList.remove('show');
   ui.ovEnd.classList.remove('show');
   loadLevel(0);
@@ -1711,6 +1834,8 @@ document.addEventListener('visibilitychange', () => { last = performance.now(); 
 // 球纹已在 resize() 里按 dpr 构建
 loadSettings();
 syncAssistUI();
+loadRecord();
+syncRecordUI();
 loadLevel(0);
 g.phase = 'menu';
 requestAnimationFrame(loop);
