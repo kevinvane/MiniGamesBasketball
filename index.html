@@ -1976,13 +1976,20 @@ function drawAim(){
   ctx.restore();
 
   // 力度环
-  const pw = g.aim.power;
+  /* 三段阈值必须按 MAX_DRAG 取比例，不能写死像素值。
+     g.aim.power 在 updateAim() 与 endAim() 里都被 Math.min(len, MAX_DRAG) 夹住，
+     而 MAX_DRAG = MAX_SPEED / PWR = 190 —— 早前这里写的是
+     `pw > 260 ? 红 : pw > 170 ? 黄 : 绿`：
+     260 比量程上限还大，红色**永远画不出来**；绿色又吃掉 0~170（89% 的量程），
+     于是整个环几乎恒绿，只在顶端闪一下黄。
+     现在按比例切：0~45% 绿 / 45~75% 黄 / 75~100% 红。 */
+  const pw = g.aim.power, pwK = pw / MAX_DRAG;
   ctx.save();
   ctx.lineWidth = 6;
   ctx.strokeStyle = 'rgba(15,23,42,.35)';
   ctx.beginPath(); ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, Math.PI*1.5); ctx.stroke();
-  ctx.strokeStyle = pw > 260 ? '#ef4444' : pw > 170 ? '#f59e0b' : '#22c55e';
-  ctx.beginPath(); ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, -Math.PI/2 + Math.PI*2*(pw/MAX_DRAG)); ctx.stroke();
+  ctx.strokeStyle = pwK > 0.75 ? '#ef4444' : pwK > 0.45 ? '#f59e0b' : '#22c55e';
+  ctx.beginPath(); ctx.arc(g.ball.x, g.ball.y, 36, -Math.PI/2, -Math.PI/2 + Math.PI*2*pwK); ctx.stroke();
   ctx.restore();
 
   // ── 瞄准辅助 ──────────────────────────────
