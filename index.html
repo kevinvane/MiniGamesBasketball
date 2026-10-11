@@ -219,6 +219,7 @@
       <span class="bar-lab">本关 <b id="par">0/0</b></span>
     </div>
     <div class="stars" id="stars">☆☆☆</div>
+    <span class="pill" id="lifePill" style="display:none" aria-live="polite">❤❤❤</span>
     <div class="spacer"></div>
     <span class="pill beat" id="beatPill" aria-live="polite"></span>
     <div class="pill" id="windPill">风 0.0</div>
@@ -241,6 +242,14 @@
         </div>
         <p style="opacity:.6;font-size:12.5px">拖得越远力量越大，方向决定弧线；<br/>空心入网有额外奖励，注意风力和移动篮架。</p>
         <p style="opacity:.55;font-size:12px"><b style="color:#fbbf24">瞄准辅助默认是「抛物线」</b>——初级提示；<br/>投不准可去 <b>⚙ 设置</b> 换成「弹道预览」或关掉辅助，选择会记住。</p>
+        <div class="set-block" style="margin:12px 0 10px">
+          <div class="set-txt"><b>模式</b><span id="modeHint"></span></div>
+          <div class="seg" role="radiogroup" aria-label="游戏模式">
+            <button class="seg-btn" data-mode="campaign" role="radio" aria-checked="true">🏁 关卡</button>
+            <button class="seg-btn" data-mode="endless"  role="radio" aria-checked="false">♾ 无尽</button>
+            <button class="seg-btn" data-mode="daily"    role="radio" aria-checked="false">📅 每日</button>
+          </div>
+        </div>
         <div class="rec-line" id="recLine"></div>
         <div class="row">
           <button class="btn" id="btnStart">开始游戏</button>
@@ -256,6 +265,14 @@
         <p id="endStars" class="stars" style="font-size:24px">☆☆☆</p>
         <p id="endInfo"></p>
         <div class="rec-line" id="endRec"></div>
+        <div class="set-block" style="margin:10px 0 0">
+          <div class="seg" role="radiogroup" aria-label="游戏模式">
+            <button class="seg-btn" data-mode="campaign" role="radio" aria-checked="true">🏁 关卡</button>
+            <button class="seg-btn" data-mode="endless"  role="radio" aria-checked="false">♾ 无尽</button>
+            <button class="seg-btn" data-mode="daily"    role="radio" aria-checked="false">📅 每日</button>
+          </div>
+          <div class="set-hint" id="modeHint2"></div>
+        </div>
         <div class="row">
           <button class="btn" id="btnAgain">再来一局</button>
           <button class="btn ghost" id="btnClose">看看场地</button>
@@ -273,6 +290,14 @@
           <li>每关左上角进度条是<em>本关目标分</em>，达标立刻过关并结算剩余时间奖励。</li>
           <li>时间耗尽也会进入下一关，但没达标就没有时间奖励。</li>
         </ol>
+        <div class="set-block" style="margin:4px 0 14px">
+          <div class="set-txt">
+            <b>游戏模式</b>
+            <span><b>🏁 关卡</b>：8 关手工配置，达标即过关，限时耗尽也能带着已有分数进下一关。<br/>
+            <b>♾ 无尽</b>：按种子随机生成无限波次，难度逐波上升。<em>3 颗心</em>：达标过关 +1 心，时间耗尽仍未达标 -1 心，心用完本局结束，比的是撑到第几波。<br/>
+            <b>📅 每日</b>：<em>按当天日期做种子</em>，所以全球玩家当天拿到的是同一组 3 关；走完即成功，连续完成累计连胜天数，当天可以重打取最好成绩。</span>
+          </div>
+        </div>
         <div class="set-block" style="margin:4px 0 14px">
           <div class="set-txt">
             <b>瞄准辅助线</b>
@@ -334,6 +359,7 @@
     <div class="hint">拖拽蓄力 · 松手投篮</div>
     <div class="hint">空心球 SWISH +50</div>
     <div class="hint">越远分越高</div>
+    <div class="hint">关卡 / ♾ 无尽 / 📅 每日 三种模式</div>
     <div class="hint">R 键重开</div>
     <div class="hint">? 玩法 · ⚙ 辅助线设置</div>
   </div>
@@ -375,7 +401,14 @@ const LAND_T = 0.30;               // 落地缓冲时长(s)
 const IDLE_ARM = 0.95;             // 站立时手臂角度(朝下，贴着球)
 // 从松手到球真正出手的耗时（下蹲 + 起跳到最高点），移动篮架的时间基准要用它
 const RISE_T = Math.ceil(JUMP_V / (GRAVITY / 60)) / 60;
-const RELEASE_DELAY = CROUCH_T + RISE_T;
+/* 下蹲那一段必须**向上取整到整帧**：跳投状态机是「s.t += dt，s.t >= CROUCH_T 才切状态」，
+   而 s.t 每帧只加 1/60，所以实际下蹲是 ceil(0.17*60) = 11 帧 = 0.18333s，不是 0.17s。
+   早前这里直接写 CROUCH_T + RISE_T = 32.2 帧，比实机真实的 33 帧少 0.8 帧（13.3ms）。
+   篮架最快 98px/s，这点偏差就是 1.3px —— 静止篮架无所谓，x 轴移动只把误差从
+   0.01px 抬到 0.22px，但**y 轴移动篮架在「球顶点高度 ≈ 篮圈高度」时会直接翻面**：
+   模型说球穿过了篮圈平面，实机根本没穿过去（详见路线图 P2-7）。
+   代价是 dt != 1/60 时这个常量仍然对不齐，而预览只能用一个固定值，所以取 60fps 这档。 */
+const RELEASE_DELAY = Math.ceil(CROUCH_T * 60) / 60 + RISE_T;
 
 const canvas = document.getElementById('cv');
 let ctx = canvas.getContext('2d');     // 用 let：烘焙场景时要临时把它指向离屏画布
@@ -404,6 +437,7 @@ const ui = {
   wind:$('windPill'), toast:$('toast'), ovStart:$('ovStart'), ovEnd:$('ovEnd'),
   endTitle:$('endTitle'), endScore:$('endScore'), endStars:$('endStars'), endInfo:$('endInfo'),
   ovHelp:$('ovHelp'), ovSet:$('ovSet'), assistHint:$('assistHint'),
+  life:$('lifePill'), modeHint:$('modeHint'), modeHint2:$('modeHint2'),
   beatPill:$('beatPill'), recLine:$('recLine'), recBadge:$('recBadge'), endRec:$('endRec')
 };
 
@@ -412,7 +446,10 @@ const ui = {
    preview : 弹道预览 —— 考虑碰撞 + 命中判定 + 移动篮架虚影
    off     : 完全关闭 —— 只保留拉杆与力度环                    */
 const ASSIST_ARC = 'arc', ASSIST_PREVIEW = 'preview', ASSIST_OFF = 'off';
-const SETTINGS = { assist: ASSIST_ARC };
+/* 模式也走同一套设置落库范式：白名单校验，非法值回落默认 */
+const MODE_CAMPAIGN = 'campaign', MODE_ENDLESS = 'endless', MODE_DAILY = 'daily';
+const MODES = [MODE_CAMPAIGN, MODE_ENDLESS, MODE_DAILY];
+const SETTINGS = { assist: ASSIST_ARC, mode: MODE_CAMPAIGN };
 const ASSIST_HINT = {
   arc: '绿色理想抛物线：只算重力和风，不考虑篮圈、挡板和篮架移动。作为初始辅助最合适。',
   preview: '琥珀色 = 会磕到篮圈或篮板；绿圈 = 能进；橙叉 = 会打铁；移动篮架关会显示球到达时的虚线虚影。',
@@ -422,9 +459,12 @@ const SET_KEY = 'nulan.settings';
 function loadSettings(){
   try {
     const raw = localStorage.getItem(SET_KEY);
-    if (raw){
-      const v = JSON.parse(raw).assist;
+    if(raw){
+      const o = JSON.parse(raw);
+      if(!o || typeof o !== 'object') return;
+      const v = o.assist;
       if (v === ASSIST_ARC || v === ASSIST_PREVIEW || v === ASSIST_OFF) SETTINGS.assist = v;
+      if (MODES.indexOf(o.mode) >= 0) SETTINGS.mode = o.mode;
     }
   } catch (e) { /* 隐私模式 / 存储不可用：保持默认值 */ }
 }
@@ -446,6 +486,36 @@ function setAssist(v){
   saveSettings();
   syncAssistUI();
 }
+/* ── 模式 ──
+   战役 = 手工配好的 8 关；无尽 = 按种子生成的无限波次；每日 = 按日期种子生成的 3 关。
+   三种模式共用同一套物理 / 计分 / 存档，差别只在「关卡从哪来」和「失败怎么办」。 */
+const MODE_HINT = {
+  campaign: '8 关递进：每关有目标分与限时，达标立刻过关并结算时间奖励。',
+  endless:  '无限波次，难度逐波上升。3 颗心：达标过关 +1 心，时间耗尽仍未达标 -1 心，心用完即结束。',
+  daily:    '每天一组固定的 3 关（全球同一份）。3 颗心，走完即算成功，连续完成累计连胜天数。'
+};
+function modeBtns(){ return document.querySelectorAll('[data-mode]'); }
+function modeHintTxt(){
+  if (SETTINGS.mode === MODE_DAILY)
+    return `今天 3 关 · 连胜 <b>${curStreak()}</b> 天 · 最佳 <b>${REC.dailyBest}</b> 分`;
+  if (SETTINGS.mode === MODE_ENDLESS)
+    return `历史最佳 <b>${REC.endlessBest}</b> 分 · 最远第 <b>${REC.endlessLv}</b> 波`;
+  return MODE_HINT[MODE_CAMPAIGN];
+}
+function syncModeUI(){
+  modeBtns().forEach(b => {
+    b.setAttribute('aria-checked', b.getAttribute('data-mode') === SETTINGS.mode ? 'true' : 'false');
+  });
+  const txt = modeHintTxt();
+  if (ui.modeHint)  ui.modeHint.innerHTML  = txt;
+  if (ui.modeHint2) ui.modeHint2.innerHTML = txt;
+}
+function setMode(v){
+  if (MODES.indexOf(v) < 0) return;
+  SETTINGS.mode = v;
+  saveSettings();
+  syncModeUI();
+}
 function isPaused(){
   return ui.ovHelp.classList.contains('show') || ui.ovSet.classList.contains('show');
 }
@@ -457,10 +527,18 @@ function isPaused(){
    校验用 typeof + Number.isFinite 而不是 isFinite：后者对 '123' 这类脏数据
    会先隐式转换再判为合法，等于把字符串当数字写回去。                    */
 const REC_KEY = 'nulan.record';
-const REC_DEF = { best:0, stars:0, clears:0, plays:0, last:0 };
+const REC_DEF = {
+  best:0, stars:0, clears:0, plays:0, last:0,              // 战役
+  endlessBest:0, endlessLv:0,                              // 无尽
+  dailyBest:0, dailyStreak:0, dailyDate:0                 // 每日（dailyDate = YYYYMMDD）
+};
 const REC = { ...REC_DEF };
 /* 上限用来挡掉手改 / 写入被截断造成的天文数字 */
-const REC_MAX = { best:9999999, stars:99, clears:99999, plays:99999, last:9999999 };
+const REC_MAX = {
+  best:9999999, stars:99, clears:99999, plays:99999, last:9999999,
+  endlessBest:9999999, endlessLv:9999,
+  dailyBest:9999999, dailyStreak:9999, dailyDate:99999999
+};
 function recInt(v, max){
   if(typeof v !== 'number' || !Number.isFinite(v)) return null;
   const n = Math.floor(v);
@@ -487,17 +565,41 @@ function saveRecord(){
 }
 /* 开局卡片的历史行。有存档才显示，避免首次进入摆一行「最高 0 分」吓人 */
 function syncRecordUI(){
-  if(!REC.plays && !REC.best){
+  if(!REC.plays && !REC.best && !REC.endlessBest && !REC.dailyBest){
     ui.recLine.innerHTML = '';
     ui.recLine.style.display = 'none';
     return;
   }
   ui.recLine.style.display = '';
-  const stars = REC.stars;
-  const starTxt = `最佳 <b>${stars}</b>/${LEVELS.length * 3} ★`;
+  const starTxt = `最佳 <b>${REC.stars}</b>/${LEVELS.length * 3} ★`;
   const clearTxt = REC.clears > 0 ? ` · 全通关 <b>${REC.clears}</b> 次` : '';
+  const endlessTxt = REC.endlessLv > 0 ? ` · ♾ 最远第 <b>${REC.endlessLv}</b> 波` : '';
   ui.recLine.innerHTML =
-    `🏅 最高 <b>${REC.best}</b> 分 · ${starTxt}${clearTxt} · 第 <b>${REC.plays}</b> 局`;
+    `🏅 最高 <b>${REC.best}</b> 分 · ${starTxt}${clearTxt}${endlessTxt} · 第 <b>${REC.plays}</b> 局`;
+}
+
+/* ── 日期与连胜 ──
+   「今天」按**本地时区**算：玩家在本地时间 00:00 换日，而不是 UTC。
+   dayKeyShift(key, delta) 从 key 往回推天数，先落在当月 1 号再 setDate，
+   这样 3/31 → 2/28、跨年这类边界不会靠 setDate 自己纠错（各引擎行为不一）。 */
+function dayKey(d){
+  const x = d || new Date();
+  return x.getFullYear() * 10000 + (x.getMonth() + 1) * 100 + x.getDate();
+}
+function dayKeyShift(key, delta){
+  const y = Math.floor(key / 10000), m = Math.floor(key / 100) % 100, d = key % 100;
+  const x = new Date(y, m - 1, 1);
+  x.setDate(d + delta);
+  return dayKey(x);
+}
+/* 连续挑战天数：只认「今天」或「昨天」的记录，更早的一律算断。
+   这样即使玩家一周没打开游戏，streak 也只减 1 而不是被一次清零掩盖成 bug。 */
+function curStreak(){
+  const n = REC.dailyStreak;
+  if(!n || !REC.dailyDate) return 0;
+  const today = dayKey();
+  if(REC.dailyDate === today || REC.dailyDate === dayKeyShift(today, -1)) return n;
+  return 0;
 }
 
 /* ─────────────────────────── 音效 ─────────────────────────── */
@@ -552,9 +654,174 @@ const LEVELS = [
   { hoopX:862, hoopY:210, rim:54, time:24, par:800,  wind:-100,mover:{axis:'x',amp:85,speed:1.6},        blocks:[{x:430,y:312,w:24,h:230},{x:640,y:396,w:24,h:146}], tip:'终极考验：一切都有！' }
 ];
 
+/* ─────────────────────── 关卡生成（无尽 / 每日） ───────────────────────
+   战役 8 关是手工配的；无尽与每日用同一个生成器，只是换一种「种子来源」：
+   无尽用本局随机种子，每日用当天日期 —— 同一个种子永远生成同一关，可复现、可排行。
+
+   唯一的硬约束：**生成出来的关卡必须真的进得去**。
+   不能「看着差不多就放行」，因为 P1-3 那条同质化问题已经够烦了，
+   再让玩家抽到一个无解的随机关，整个模式会直接劝退。
+   所以每关生成完都用游戏自己的 simulateShot（与 updateFly 同源）扫一遍网格，
+   扫不到足够多的解就重摇，最多 14 次；14 次都不行就兜底到一关已验证可解的战役关。
+   ---------------------------------------------------------------------------- */
+function mulberry32(a){
+  // 32bit 整数种子 → [0,1) 伪随机。同样的 a 永远得到同样的序列（可复现的前提）。
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function mixSeed(a, b){
+  let h = (a ^ Math.imul(b | 0, 0x9E3779B1)) >>> 0;
+  h ^= h >>> 16; h = Math.imul(h, 0x85EBCA6B) >>> 0;
+  h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35) >>> 0;
+  return (h ^ h >>> 16) >>> 0;
+}
+const lerp = (a, b, k) => a + (b - a) * k;
+const RAMP = 40;               // 难度在 40 关内线性爬到上限
+const LIVES_MAX = 3;
+const DAILY_LEN = 3;
+
+/* 按种子摇一关（只摇，不验证 —— 验证交给 levelSolvable） */
+function drawLevel(seed, i){
+  const rnd = mulberry32(seed);
+  const t = Math.min(1, i / RAMP);
+
+  const rim  = Math.round(lerp(62, 53, t));
+  const time = Math.round(lerp(30, 24, t));
+  // 篮架位置：低关卡位置分散、高关卡被压到右侧远处（更远 = 更难）
+  const hoopX = Math.round(lerp(560, 760, t) + rnd() * lerp(280, 60, t));
+  const hoopY = Math.round(lerp(186, 250, t) + rnd() * 80);
+
+  // 风：10 的整数倍（和 HUD 的读数粒度一致），越往后越常见、越大
+  let wind = 0;
+  if (rnd() < 0.22 + 0.58 * t){
+    wind = Math.round(lerp(40, 170, t) * (0.45 + 0.55 * rnd()) / 10) * 10;
+    if (rnd() < .5) wind = -wind;
+  }
+
+  // 移动篮架：第 2 关起才可能出现
+  let mover = null;
+  if (i >= 1 && rnd() < 0.32 + 0.46 * t){
+    mover = {
+      axis : rnd() < .5 ? 'y' : 'x',
+      amp  : Math.round(lerp(48, 98, t) + rnd() * 18),
+      speed: Math.round((lerp(1.0, 1.85, t) + 0.4 * rnd()) * 100) / 100
+    };
+  }
+
+  // 挡板：竖条，夹在球员与篮架之间。顶端留够高度，靠求解器兜底筛掉封死射线的组合。
+  const maxB = i < 2 ? 0 : i < 8 ? 1 : 2;
+  const nb = maxB ? Math.floor(rnd() * (maxB + 1)) : 0;
+  const blocks = [];
+  for (let k = 0; k < nb; k++){
+    const h = Math.round(lerp(120, 230, t) * (0.6 + 0.4 * rnd()));
+    const span = Math.max(60, hoopX - 96 - 400);
+    blocks.push({ x: Math.round(400 + rnd() * span), y: GROUND_Y - h, w: 24, h });
+  }
+
+  // 目标分按「单球理论分 × 需要几球」推，而不是拍脑袋写死：
+  // 单球 ≈ 100 + 距离分 + 剩余时间×4 + 空心 50（按打完 2~3 球后还剩 72% 时间估）
+  const dist = Math.hypot(hoopX - LAUNCH_X, hoopY - LAUNCH_Y);
+  const oneShot = 100 + Math.round(dist / 11) + Math.round(time * 4 * .72) + 50;
+  const par = Math.round(oneShot * (1.85 + 0.30 * t) / 10) * 10;
+
+  const bits = [];
+  if (wind) bits.push(wind > 0 ? '顺风' : '逆风');
+  if (mover) bits.push(mover.axis === 'y' ? '篮架上下' : '篮架左右');
+  if (nb) bits.push(nb + ' 块挡板');
+  return { hoopX, hoopY, rim, time, par, wind, mover, blocks,
+           tip: bits.length ? bits.join(' · ') : '无风无挡 · 纯手感' };
+}
+
+/* ── 求解器：这一关到底进不进得去 ──
+   直接调用 simulateShot —— 与实机 updateFly 步长 / 碰撞 / 判定顺序完全同源，
+   所以它说「能进」实机那一杆就真能进。
+   两处刻意留的余量：
+     · 角度以「直线瞄准篮心」为中心扫 ±0.55rad，而不是全角扫 —— 全角要 3~4 倍的
+       弹道数才能覆盖同样的密度，而远处的篮本来就只可能被那一段角度命中
+     · 命中误差要求 err ≤ rim/2 - 7，比实机的 rim/2 - 4 再严 3px，
+       用来吸收出手点高度 jumpApex 随 dt 的几像素抖动                            */
+const SOLVE_A = 15, SOLVE_P = 26;
+const SOLVE_OPT = { pts:false, fast:true };
+function solveOnce(timer, need){
+  g.lv.timer = timer;
+  /* 瞄准中心必须对准**这个相位上**篮架的位置，也就是 hoopAt(timer)。
+     一开始写成 rimCenters()（= g.hoopOff，也就是 rest 位置）——
+     快速移动的篮架一个相位能偏出 98px，窗口整个扫到篮架身后，
+     于是「解不存在」，扫描跑满全网格还返回 0：既慢又漏。
+     拿错了中心比窗口开得小隐蔽得多，因为表现只是「更难解」而不是「报错了」。 */
+  const hp = hoopAtInto(timer);
+  const ref = releaseOrigin(0);
+  const a0 = Math.atan2(ref.y - hp.cy, hp.cx - ref.x);
+  const span = .55, lim = g.lv.rim / 2 - 7;
+  let found = 0;
+  for (let ai = 0; ai < SOLVE_A; ai++){
+    const ang = a0 - span + 2 * span * ai / (SOLVE_A - 1);
+    if (ang < .03 || ang > 1.45) continue;
+    const o = releaseOrigin(ang);
+    // cos/sin 提到力度循环外面：同一个角度要扫 26 个力度，
+    // 放在里面等于每个网格点都重算两次三角函数
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    for (let pi = 0; pi < SOLVE_P; pi++){
+      const sp = 380 + (MAX_SPEED - 380) * pi / (SOLVE_P - 1);
+      let vx = ca * sp, vy = -sa * sp;
+      // 与 endAim() 同样的最小仰角夹取，保证求解器扫到的都是实机能复现的参数
+      if (vy > -140){ const k = sp / Math.max(Math.hypot(vx, vy), 1); vx *= k; vy *= k; }
+      const sim = simulateShot(o.x, o.y, vx, vy, SOLVE_OPT);
+      if (sim.scored && sim.arrive && sim.arrive.err <= lim){
+        if (++found >= need) return found;      // 够用就收工，别把帧率耗在这上面
+      }
+    }
+  }
+  return found;
+}
+function levelSolvable(lv){
+  const savedLv = g.lv, savedOff = g.hoopOff;
+  g.lv = lv; g.hoopOff = 0;
+  try {
+    const m = lv.mover;
+    if (!m) return solveOnce(0, 3) >= 1;
+    // 移动篮架的解的存在性**取决于相位**：同一关 t=0 打不进，t=0.8s 可能就打进了。
+    // 取一整个周期里的 4 个相位，要求过半可解 —— 低于这个数说明这关「只在特定窗口能进」，
+    // 对无尽模式来说就是抽到即劝退。不用「所有相位都有解」是因为那会把手牌收得太窄。
+    const PH = 4, period = 2 * Math.PI / m.speed;
+    let ok = 0;
+    for (let p = 0; p < PH; p++){
+      if (solveOnce(p / PH * period, 2) >= 1) ok++;
+      if (ok * 2 >= PH) return true;    // 已经过半，后面的相位不用再看了
+    }
+    return ok * 2 >= PH;
+  } finally {
+    g.lv = savedLv; g.hoopOff = savedOff;
+  }
+}
+/* 第 i 关（i 从 0 起）。战役直接查表；其余模式按「模式种子 + i」现场生成并验证。 */
+function levelAt(i){
+  if (g.mode === MODE_CAMPAIGN) return LEVELS[Math.min(i, LEVELS.length - 1)];
+  const key = g.mode === MODE_DAILY ? g.dailyKey : g.runSeed;
+  for (let k = 0; k < 14; k++){
+    const lv = drawLevel(mixSeed(key, i + 1 + k * 1013), i);
+    if (levelSolvable(lv)) return lv;
+  }
+  // 14 次都不达标（理论上极罕见）：兜底到一关**已验证可解**的战役关，绝不放出无解关卡
+  return { ...LEVELS[Math.min(i, LEVELS.length - 1)] };
+}
+function runLength(){
+  if (g.mode === MODE_ENDLESS) return Infinity;
+  if (g.mode === MODE_DAILY)   return DAILY_LEN;
+  return LEVELS.length;
+}
+
 /* ─────────────────────────── 状态 ─────────────────────────── */
 const g = {
   phase:'menu',            // menu | aim | shoot | fly | settle | over
+  mode:MODE_CAMPAIGN,      // 当前模式（开新局时才切，中途不换）
+  lives:0,                 // 无尽 / 每日：剩余生命；战役恒为 0
+  won:false,                // 本局是否通关（仅结算时读取）
+  runSeed:0, dailyKey:0,   // 关卡生成种子（无尽=本局随机，每日=当天日期）
   levelIndex:0, score:0, combo:0, best:0,
   levelStars:0, totalStars:0,
   timeLeft:30,
@@ -575,7 +842,7 @@ const STAR_BREAK = [0, 270, 300, 330];
 
 /* ─────────────────────────── 关卡控制 ─────────────────────────── */
 function loadLevel(i){
-  const L = LEVELS[i];
+  const L = levelAt(i);
   g.levelIndex = i;
   g.lv = { ...L, timer:0, touchedRim:false };
   g.levelStars = 0;
@@ -589,8 +856,31 @@ function loadLevel(i){
   g.parts.length = 0;
   resetBall();
   g.phase = 'aim';
-  ui.lv.textContent = (i+1) + '/' + LEVELS.length;
+  ui.lv.textContent = levelLabel(i);
   showToast(L.tip, '#93c5fd', 20);
+}
+function levelLabel(i){
+  return g.mode === MODE_ENDLESS ? ('第 ' + (i + 1) + ' 波') : ((i + 1) + '/' + runLength());
+}
+/* 达标过关：回 1 颗心（上限 LIVES_MAX）。只对无尽 / 有效，战役没有命。 */
+function gainLife(){
+  if (g.lives < LIVES_MAX){
+    g.lives++;
+    showToast2('+1 生命', '#86efac');
+  }
+}
+/* 时间耗尽仍未达标：扣 1 颗心。扣完心在下一关的入口结算（见 advanceLevel）。 */
+function loseLife(){
+  if (g.mode === MODE_CAMPAIGN) return;
+  g.lives--;
+  showToast('未达标 · 生命 -1', '#f87171', 22);
+  sfx.miss();
+}
+/* 本模式跑完（而非被打断）算不算「赢」 */
+function runComplete(){
+  if (g.mode === MODE_ENDLESS) return false;        // 无尽没有终点
+  if (g.mode === MODE_DAILY)   return true;         // 走完 3 关即成功
+  return g.cleared >= LEVELS.length;
 }
 /* 过关 / 进入下一关 */
 function advanceLevel(cleared){
@@ -600,16 +890,23 @@ function advanceLevel(cleared){
     g.cleared++;
     showToast2(`过关时间奖励 +${bonus}`, '#fde68a');
     checkBeatPrev();          // 过关奖励也会把总分推过上一局
+    gainLife();
+  } else {
+    loseLife();
   }
   g.totalStars += g.levelStars;
-  if(g.levelIndex + 1 < LEVELS.length){
-    loadLevel(g.levelIndex + 1);
-    if(cleared) sfx.score();
-  } else {
+  /* 结束条件有三个：① 走到最后一关 ② 命用光（无尽/每日）③ 三者都满足才算赢。
+     命用光时不再进下一关 —— 那样玩家会看到「-1 心」之后还能继续打，规则就废了。 */
+  const outOfLives = g.mode !== MODE_CAMPAIGN && g.lives <= 0;
+  const isLast = g.levelIndex + 1 >= runLength();
+  if (isLast || outOfLives){
     g.phase = 'over';
     sfx.over();
-    showEnd(g.cleared >= LEVELS.length);
+    showEnd(!outOfLives && runComplete());
+    return;
   }
+  loadLevel(g.levelIndex + 1);
+  if(cleared) sfx.score();
 }
 function updateTrail(dt){
   if(g.phase === 'fly') return;          // 飞行中由 updateFly 维护
@@ -645,15 +942,22 @@ function rimCenters(){
   const cy = L.hoopY + (L.mover && L.mover.axis === 'y' ? off : 0);
   return { cx, cy };
 }
-/* 任意「距今 tOff 秒」时刻篮架会在哪 —— 预览用，和 rimCenters() 同一套公式 */
-function hoopAt(tOff){
+/* 任意「距今 tOff 秒」时刻篮架会在哪 —— 预览用，和 rimCenters() 同一套公式。
+   拆成 _hoop（复用对象）+ hoopAt（拷贝一份）两层，是为了求解器：
+   它一次要跑几十万帧，每次 new 一个 {cx,cy} 出来，光分配就吃掉大半时间。
+   公式仍然只有这一处，改这里两边同时变。 */
+const _hoop = { cx:0, cy:0 };
+function hoopAtInto(tOff){
   const L = g.lv, m = L.mover;
-  if(!m) return { cx: L.hoopX, cy: L.hoopY };
+  if(!m){ _hoop.cx = L.hoopX; _hoop.cy = L.hoopY; return _hoop; }
   const off = Math.sin((L.timer + tOff) * m.speed) * m.amp;
-  return {
-    cx: L.hoopX + (m.axis === 'x' ? off : 0),
-    cy: L.hoopY + (m.axis === 'y' ? off : 0)
-  };
+  _hoop.cx = L.hoopX + (m.axis === 'x' ? off : 0);
+  _hoop.cy = L.hoopY + (m.axis === 'y' ? off : 0);
+  return _hoop;
+}
+function hoopAt(tOff){
+  const r = hoopAtInto(tOff);
+  return { cx:r.cx, cy:r.cy };
 }
 
 /* ─────────────────────────── 碰撞体 ─────────────────────────── */
@@ -857,16 +1161,25 @@ function predict(px, py, vx, vy){
 /* ── 预览用弹道模拟 ──
    与 updateFly 同源：同样的步长、同样的碰撞、命中判定也在碰撞之前，
    所以「预览所见」= 「实机所得」。移动篮架按 hoopAt(tOff) 逐帧推进，
-   因此能算出球到达时篮架究竟在哪。                              */
-function simulateShot(px, py, vx, vy){
+   因此能算出球到达时篮架究竟在哪。
+
+   collectPts 传 false 时只做判定、不收集路径点：关卡求解器一次要跑几千条弹道，
+   省下的每帧 {x,y,m} 对象是那一步能不能降到个位数 ms 的关键。
+   fast 传 true 时允许提前收工（见循环末尾的证明注释）。
+   物理本身**一个数字都没改**，回归里用「改前改后 pts/scored/arrive 逐条相同」来钉死这一点。 */
+function simulateShot(px, py, vx, vy, opt){
   const L = g.lv;
   const dt = 1/60;
-  const pts = [];
+  const o = opt || EMPTY_OPT;
+  const want = o.pts !== false;
+  const fast = o.fast === true;
+  const pts = want ? [] : null;
   let x = px, y = py, a = vx, b = vy, t = 0;
   let scored = false, rimHit = false, boardHit = false, mark = false;
   let firstCross = null, arrive = null;
+  simRects(L, hoopAtInto(RELEASE_DELAY));           // 先把清单建出来（后面按 .length 遍历）
   for (let i = 0; i < 400; i++){
-    const hp = hoopAt(RELEASE_DELAY + t);   // 本帧开始时篮架的位置
+    const hp = hoopAtInto(RELEASE_DELAY + t);   // 本帧开始时篮架的位置
     const prevX = x, prevY = y;
     a += (L.wind || 0) * dt;
     b += GRAVITY * dt;
@@ -884,10 +1197,11 @@ function simulateShot(px, py, vx, vy){
       if (!scored && firstCross.err <= L.rim/2 - 4){ scored = true; mark = true; arrive = firstCross; }
     }
     // 矩形体：篮板 / 立柱 / 关卡挡板（与 hoopRects() 同源）
-    const rects = [
-      { x: hp.cx + L.rim/2 + 3, y: hp.cy - 100, w: 18, h: 102, board: 1 },
-      { x: hp.cx + L.rim/2 + 7, y: hp.cy + 2, w: 12, h: GROUND_Y - hp.cy }
-    ].concat(L.blocks || []);
+    /* simRects() 返回的是**数组本身**，所以这里必须按 rects.length 遍历。
+       （曾经写成 `const n = simRects(...); for(k<n)` —— 拿数组跟数字比会得到 NaN，
+        比较恒为 false，于是整个矩形碰撞循环一次都没跑：球直接穿过立柱和挡板。
+        「看起来等价」在这里等于「静默改物理」，靠肉眼根本看不出来。） */
+    const rects = simRects(L, hp);
     for (let k = 0; k < rects.length; k++){
       const hit = circleRect(x, y, BALL_R, rects[k]);
       if (!hit) continue;
@@ -899,8 +1213,10 @@ function simulateShot(px, py, vx, vy){
         if (rects[k].board) boardHit = true;
       }
     }
-    // 篮圈
-    for (const s of [-1, 1]){
+    // 篮圈（两侧展开写：原来 `for (const s of [-1, 1])` 每帧都要新建一个数组 + 走迭代器，
+    // 求解器一跑就是几十万帧，这点开销完全不成比例）
+    for (let si = 0; si < 2; si++){
+      const s = si ? 1 : -1;
       const rx = hp.cx + s*L.rim/2, ry = hp.cy, rr = RIM_R + BALL_R;
       const dx = x-rx, dy = y-ry, d2 = dx*dx + dy*dy;
       if (d2 < rr*rr){
@@ -923,13 +1239,45 @@ function simulateShot(px, py, vx, vy){
     if (x < BALL_R){ x = BALL_R; if (a < 0) a *= -0.55; }
     if (x > W - BALL_R){ x = W - BALL_R; if (a > 0) a *= -0.55; }
 
-    if (i % 2 === 0) pts.push({ x, y, m: mark });
+    if (want && i % 2 === 0) pts.push({ x, y, m: mark });
     if (y > H + 40 || x < -80 || x > W + 80) break;
     if (b > 0 && y >= GROUND_Y - BALL_R - 1 && Math.hypot(a,b) < 62) break;
+    /* fast 模式的提前收工：球已经掉到篮圈下方 40px 且仍在下落 → 这一杆没戏了。
+       证明它**不改变任何判定结论**：scored 与 arrive 都只由**第一次**向下穿过
+       篮圈平面那一次决定（firstCross 一旦记下就不会被改写），而球在掉到 cy+40
+       之前不可能再发生第二次「向下穿过 cy」—— 那需要它先重新升过 cy。
+       网格里绝大多数是打飞的球，不这么做的话每条都要在地面上弹满 400 帧。
+       用 hp.cy（逐帧跟踪移动篮架）而不是 L.hoopY：篮架振幅能到 98px，
+       拿静止高度当阈值会在篮架下移时提前收工，把能进的关误判成无解。      */
+    if (fast && b > 0 && y > hp.cy + 40) break;
   }
   // 命中则显示命中时刻的篮架位置；没命中则退回第一次穿过平面的落点提示
-  return { pts, scored, rimHit, boardHit, arrive: arrive || firstCross };
+  return { pts: pts || [], scored, rimHit, boardHit, arrive: arrive || firstCross };
 }
+const EMPTY_OPT = { pts:true, fast:false };
+/* 模拟用的矩形清单（篮板 / 立柱 / 挡板）。
+   这三者里只有篮板与立柱随篮架移动，挡板是关卡常量 —— 所以把清单**建一次**，
+   之后每帧只改篮架那两项的坐标。原来是每帧 `[...].concat(blocks)` 重新分配，
+   一次求解要跑几千条弹道、几十万帧，光分配就吃掉绝大部分时间。
+   刻意做成模块级缓存：simulateShot 不递归，所以不存在重入问题。 */
+let _sRects = null;
+function simRects(L, hp){
+  const bl = L.blocks || [], n = 2 + bl.length;
+  if (!_sRects || _sRects.length !== n) _sRects = Array.from({length:n}, () => ({x:0,y:0,w:0,h:0,board:0}));
+  const r0 = _sRects[0], r1 = _sRects[1];
+  r0.x = hp.cx + L.rim/2 + 3; r0.y = hp.cy - 100; r0.w = 18; r0.h = 102; r0.board = 1;
+  r1.x = hp.cx + L.rim/2 + 7; r1.y = hp.cy + 2;     r1.w = 12; r1.h = GROUND_Y - hp.cy; r1.board = 0;
+  for (let k = 0; k < bl.length; k++){
+    const b = bl[k], r = _sRects[2+k];
+    r.x = b.x; r.y = b.y; r.w = b.w; r.h = b.h; r.board = 0;
+  }
+  return _sRects;
+}
+/* 圆 vs 矩形，返回推出方向与推出后的球心。
+   结果写进复用的 _hit：两个调用方（collide / simulateShot）都是拿到就立刻用完，
+   没有任何一处会把它存下来，所以复用是安全的；求解器每秒要问几十万次这个问题，
+   每次 new 一个对象会直接成为瓶颈。 */
+const _hit = { nx:0, ny:0, dx:0, dy:0, depth:0 };
 function circleRect(cx, cy, r, rc){
   const nx = Math.max(rc.x, Math.min(cx, rc.x + rc.w));
   const ny = Math.max(rc.y, Math.min(cy, rc.y + rc.h));
@@ -937,13 +1285,15 @@ function circleRect(cx, cy, r, rc){
   let d2 = dx*dx+dy*dy;
   if(d2 > r*r) return null;
   let d = Math.sqrt(d2) || .0001;
-  if(d2 > 1e-6){ dx/=d; dy/=d; return { nx:cx + dx*(r-d), ny:cy + dy*(r-d), dx, dy, depth:r-d }; }
+  if(d2 > 1e-6){ dx/=d; dy/=d; _hit.nx=cx+dx*(r-d); _hit.ny=cy+dy*(r-d); _hit.dx=dx; _hit.dy=dy; _hit.depth=r-d; return _hit; }
   const l = cx-rc.x, r2 = rc.x+rc.w-cx, tp = cy-rc.y, bt = rc.y+rc.h-cy;
   const m = Math.min(l,r2,tp,bt);
-  if(m === l) return { nx:rc.x-r, ny:cy, dx:-1, dy:0, depth:r };
-  if(m === r2) return { nx:rc.x+rc.w+r, ny:cy, dx:1, dy:0, depth:r };
-  if(m === tp) return { nx:cx, ny:rc.y-r, dx:0, dy:-1, depth:r };
-  return { nx:cx, ny:rc.y+rc.h+r, dx:0, dy:1, depth:r };
+  _hit.depth = r;
+  if(m === l){ _hit.nx=rc.x-r; _hit.ny=cy; _hit.dx=-1; _hit.dy=0; }
+  else if(m === r2){ _hit.nx=rc.x+rc.w+r; _hit.ny=cy; _hit.dx=1; _hit.dy=0; }
+  else if(m === tp){ _hit.nx=cx; _hit.ny=rc.y-r; _hit.dx=0; _hit.dy=-1; }
+  else { _hit.nx=cx; _hit.ny=rc.y+rc.h+r; _hit.dx=0; _hit.dy=1; }
+  return _hit;
 }
 function collide(){
   const b = g.ball;
@@ -1168,33 +1518,96 @@ function updateHUD(){
   ui.wind.textContent = '风 ' + (w>0?'→':'←') + ' ' + Math.abs(w);
   ui.wind.className = 'pill' + (w ? ' warn' : '');
   ui.timer.style.color = g.timeLeft <= 5 ? '#f87171' : '';
+  /* 生命只在无尽 / 每日显示；战役没有命，所以整个胶囊隐藏而不是显示 3 颗假心 */
+  const lp = ui.life;
+  if (g.mode === MODE_CAMPAIGN){
+    lp.style.display = 'none';
+  } else {
+    lp.style.display = '';
+    lp.textContent = '❤'.repeat(g.lives) + '♡'.repeat(LIVES_MAX - g.lives);
+    lp.className = 'pill' + (g.lives <= 1 ? ' warn' : '');
+  }
+}
+/* 每日挑战结算：连胜只认「今天 / 昨天」，当天重复完成不再累加 */
+function finishDaily(win){
+  const key = g.dailyKey;
+  if (!win){ REC.dailyStreak = 0; return; }      // 失败中断连胜，但当天仍可重打
+  if (REC.dailyDate === key) return;              // 今天已经记过成绩了
+  REC.dailyStreak = (REC.dailyDate === dayKeyShift(key, -1) && REC.dailyStreak > 0)
+    ? REC.dailyStreak + 1 : 1;
+  REC.dailyDate = key;
 }
 function showEnd(win){
   /* 先算「是否破纪录」再落库：REC.best 一旦被本局覆盖就分不清是不是新纪录了。
-     首局没有纪录可破，此时不该弹「新纪录」——否则每个人第一次玩都拿徽章，徽章就不值钱了。 */
-  const beatBest = REC.best > 0 && g.score > REC.best;
+     首局没有纪录可破，此时不该弹「新纪录」——否则每个人第一次玩都拿徽章，徽章就不值钱了。
+     各模式比各自的记录：战役比全场最高，无尽/每日比本模式最高，互不污染。 */
+  const modeBest = g.mode === MODE_ENDLESS ? REC.endlessBest
+                 : g.mode === MODE_DAILY   ? REC.dailyBest : REC.best;
+  const beatMode = modeBest > 0 && g.score > modeBest;
   const beatStars = REC.stars > 0 && g.totalStars > REC.stars;
   REC.best  = Math.max(REC.best, g.score);
   REC.stars = Math.max(REC.stars, g.totalStars);
-  if(win) REC.clears++;
+  if(g.mode === MODE_ENDLESS){
+    REC.endlessBest = Math.max(REC.endlessBest, g.score);
+    REC.endlessLv   = Math.max(REC.endlessLv, g.levelIndex + 1);
+  } else if(g.mode === MODE_DAILY){
+    REC.dailyBest = Math.max(REC.dailyBest, g.score);
+    finishDaily(win);
+  } else if(win){
+    REC.clears++;
+  }
   REC.last = g.score;
   saveRecord();
+  syncRecordUI();
+  syncModeUI();
 
   ui.ovEnd.classList.add('show');
-  ui.endTitle.textContent = win ? '🏆 全部通关！' : '⏰ 挑战结束';
+  g.won = !!win;
+  ui.endTitle.textContent = g.mode === MODE_ENDLESS ? '♾ 无尽结束'
+                          : g.mode === MODE_DAILY   ? (win ? '📅 今日挑战成功！' : '💤 今日挑战失败')
+                          : (win ? '🏆 全部通关！' : '⏰ 挑战结束');
   ui.endScore.textContent = g.score;
-  ui.recBadge.classList.toggle('show', beatBest);
-  const s = Math.min(3, Math.round(g.totalStars / LEVELS.length * 3));
-  ui.endStars.textContent = '★'.repeat(s) + '☆'.repeat(3-s);
-  ui.endInfo.innerHTML = `过关 <b>${g.cleared}</b> / ${LEVELS.length} 关
-    <br/>命中 <b>${g.makes}</b> 次 · 空心 <b>${g.swishes}</b> 次 · 最高单球 <b>${g.best}</b> 分
-    <br/><span style="opacity:.55;font-size:12px">命中率 ${g.attempts? Math.round(g.makes/g.attempts*100):0}% · 最高连击 ${g.maxCombo}</span>`;
+  ui.recBadge.textContent = g.mode === MODE_ENDLESS ? '♾ 无尽新纪录'
+                          : g.mode === MODE_DAILY   ? '📅 每日新纪录'
+                          : '🏅 新纪录';
+  ui.recBadge.classList.toggle('show', beatMode);
+  ui.endStars.textContent = g.mode === MODE_CAMPAIGN ? starRow(g.totalStars)
+                          : '❤'.repeat(Math.max(0, g.lives)) + '♡'.repeat(LIVES_MAX - Math.max(0, g.lives));
+  ui.endInfo.innerHTML = endInfoHTML();
   /* 结算卡片底部的历史行：本局与历史纪录的关系一眼可见 */
+  ui.endRec.innerHTML = endRecHTML(beatStars);
+}
+function starRow(n){
+  const s = Math.min(3, Math.round(n / LEVELS.length * 3));
+  return '★'.repeat(s) + '☆'.repeat(3 - s);
+}
+function endInfoHTML(){
+  const common = `<br/><span style="opacity:.55;font-size:12px">命中率 ${g.attempts? Math.round(g.makes/g.attempts*100):0}% · 最高连击 ${g.maxCombo} · 空心 ${g.swishes}</span>`;
+  if (g.mode === MODE_ENDLESS)
+    return `撑到第 <b>${g.levelIndex + 1}</b> 波 · 过关 <b>${g.cleared}</b> 波
+      <br/>命中 <b>${g.makes}</b> 次 · 剩余生命 <b>${Math.max(0, g.lives)}</b> ❤${common}`;
+  if (g.mode === MODE_DAILY)
+    return `${g.won ? '走完全部 3 关' : '生命耗尽'} · 过关 <b>${g.cleared}</b>/3 关
+      <br/>命中 <b>${g.makes}</b> 次 · 剩余生命 <b>${Math.max(0, g.lives)}</b> ❤${common}`;
+  return `过关 <b>${g.cleared}</b> / ${LEVELS.length} 关
+    <br/>命中 <b>${g.makes}</b> 次 · 空心 <b>${g.swishes}</b> 次 · 最高单球 <b>${g.best}</b> 分${common}`;
+}
+function endRecHTML(beatStars){
+  if (g.mode === MODE_ENDLESS){
+    const p = [`无尽最高 <b>${REC.endlessBest}</b>`, `最远 <b>${REC.endlessLv}</b> 波`, `第 <b>${REC.plays}</b> 局`];
+    return p.join(' · ');
+  }
+  if (g.mode === MODE_DAILY){
+    const p = [`每日最高 <b>${REC.dailyBest}</b>`, `连胜 <b>${curStreak()}</b> 天`];
+    if (REC.dailyDate === g.dailyKey) p.push('今日已记');
+    p.push(`第 <b>${REC.plays}</b> 局`);
+    return p.join(' · ');
+  }
   const parts = [`历史最高 <b>${REC.best}</b>`];
   if(beatStars) parts.push('<b style="color:#fde68a">星级刷新</b>');
   parts.push(`累计通关 <b>${REC.clears}</b> 次`);
   parts.push(`第 <b>${REC.plays}</b> 局`);
-  ui.endRec.innerHTML = parts.join(' · ');
+  return parts.join(' · ');
 }
 
 /* ─────────────────────────── 主循环 ─────────────────────────── */
@@ -1794,23 +2207,35 @@ function drawParts(){
 }
 
 /* ─────────────────────────── 控制 ─────────────────────────── */
-function startGame(){
+/* mode 省略时沿用设置里选中的模式 —— 三个入口（开局卡片 / 结算卡片 / R 键）共用这一处 */
+function startGame(mode){
+  if (MODES.indexOf(mode) >= 0) SETTINGS.mode = mode;
+  g.mode = SETTINGS.mode;
+  g.runSeed  = (Math.random() * 0x100000000) >>> 0;   // 无尽：每局换一批关卡
+  g.dailyKey = dayKey();                             // 每日：当天日期即种子（全球同一份）
+  g.lives = g.mode === MODE_CAMPAIGN ? 0 : LIVES_MAX;
+  g.won = false;
   g.levelIndex = 0; g.score = 0; g.totalStars = 0; g.combo = 0; g.best = 0;
   g.cleared = 0; g.maxCombo = 0;
   g.swishes = 0; g.makes = 0; g.attempts = 0;
   g.beatPrev = false;
   REC.plays++;
   saveRecord();               // 开局就计数：中途刷新也算打过一局
+  saveSettings();
   clearTimeout(beatTid);     // 上一局遗留的「超越上一局」定时器不该带进这一局
   ui.beatPill.classList.remove('show');
   ui.recBadge.classList.remove('show');
   ui.ovStart.classList.remove('show');
   ui.ovEnd.classList.remove('show');
+  syncModeUI();
+  /* 求解器要用出手点高度 jumpApex，它由 updateJumpApex(dt) 按帧步进算出。
+     开局先按 60fps 定死成确定的值，否则第一关的生成结果会随「页面停了多久」变化。 */
+  updateJumpApex(1/60);
   loadLevel(0);
 }
-$('btnStart').addEventListener('click', startGame);
-$('btnAgain').addEventListener('click', startGame);
-$('btnRestart').addEventListener('click', startGame);
+$('btnStart').addEventListener('click', () => startGame());
+$('btnAgain').addEventListener('click', () => startGame());
+$('btnRestart').addEventListener('click', () => startGame());
 $('btnClose').addEventListener('click', () => ui.ovEnd.classList.remove('show'));
 $('btnHelp').addEventListener('click', toggleHelp);
 $('btnHelp2').addEventListener('click', toggleHelp);
@@ -1824,6 +2249,11 @@ $('btnSetHelp').addEventListener('click', toggleHelp); // 设置 → 玩法说�
 segBtns().forEach(b => {
   b.addEventListener('click', () => setAssist(b.getAttribute('data-assist')));
 });
+/* 模式按钮有两批（开局卡片 + 结算卡片），共用 setMode / syncModeUI，
+   改任一处两处同时变 —— 与 P0-1 的辅助线分段控件同一套做法。 */
+modeBtns().forEach(b => {
+  b.addEventListener('click', () => setMode(b.getAttribute('data-mode')));
+});
 $('btnSound').addEventListener('click', e => {
   muted = !muted;
   e.target.textContent = muted ? '🔇' : '🔊';
@@ -1836,6 +2266,8 @@ loadSettings();
 syncAssistUI();
 loadRecord();
 syncRecordUI();
+syncModeUI();
+updateJumpApex(1/60);   // 出手点高度先定成 60fps 的确定值，生成关卡时要用
 loadLevel(0);
 g.phase = 'menu';
 requestAnimationFrame(loop);
