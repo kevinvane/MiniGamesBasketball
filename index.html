@@ -139,6 +139,12 @@
   .seg-btn[aria-checked="true"]{background:#4ade80; color:#0f172a}
   .card{
     width:min(90%, 420px);
+    /* 卡片在 #stage 里，而 #stage 是 overflow:hidden —— 不加这两行的后果是
+       「卡片比舞台高 → 直接被裁掉」，窄屏下结算卡片底部的按钮根本点不到。
+       实测 375px 视口时 stage 只有 226px 高，而结算卡片有 399px。
+       之前只有玩法说明面板（.card.help）写了这两条，开局 / 结算 / 设置共用的
+       .card 全都没有，于是窄屏下开局的「开始游戏」按钮同样够不着。          */
+    max-height:92%; overflow-y:auto;
     padding:26px 24px;
     border-radius:18px;
     text-align:center;
@@ -167,7 +173,8 @@
   .foot svg{width:14px; height:14px; fill:currentColor; flex:none}
 
   /* 玩法说明面板 */
-  .card.help{width:min(94%, 470px); text-align:left; max-height:92%; overflow-y:auto}
+  /* max-height / overflow 已由 .card 统一提供，这里只放宽宽度 */
+  .card.help{width:min(94%, 470px); text-align:left}
   .card.help h2{text-align:center; margin-bottom:14px}
   .steps{margin:0 0 14px; padding-left:20px; font-size:13px; line-height:1.85; opacity:.9}
   .steps li{margin-bottom:3px}
@@ -359,7 +366,6 @@
     <div class="hint">拖拽蓄力 · 松手投篮</div>
     <div class="hint">空心球 SWISH +50</div>
     <div class="hint">越远分越高</div>
-    <div class="hint">关卡 / ♾ 无尽 / 📅 每日 三种模式</div>
     <div class="hint">R 键重开</div>
     <div class="hint">? 玩法 · ⚙ 辅助线设置</div>
   </div>
